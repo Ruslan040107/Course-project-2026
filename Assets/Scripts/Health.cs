@@ -3,6 +3,7 @@ using UnityEngine;
 
 public class Health : MonoBehaviour
 {
+    float pendingDamage;
     public static readonly List<Health> All = new List<Health>();
 
     public int team;
@@ -29,13 +30,24 @@ public class Health : MonoBehaviour
     public void TakeDamage(float amount)
     {
         if (IsDead) return;
+        pendingDamage += amount;
+    }
 
-        current -= amount;
-        if (IsDead) OnDeath();
+    public void ApplyPending()
+    {
+        if (pendingDamage <= 0f) return;
+
+        if (!IsDead)
+        {
+            current -= pendingDamage;
+            if (IsDead) OnDeath();
+        }
+        pendingDamage = 0f;
     }
 
     public void Revive()
     {
+        pendingDamage = 0f;
         current = maxHealth;
         gameObject.SetActive(true);
     }

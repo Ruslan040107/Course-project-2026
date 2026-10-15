@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using UnityEngine;
 using UnityEngine.AI;
+using System.Collections;
 
 public class RoundManager : MonoBehaviour
 {
@@ -53,12 +54,22 @@ public class RoundManager : MonoBehaviour
 
             string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
             csvPath = Path.Combine(Application.persistentDataPath, "sim_" + stamp + ".csv");
-            File.WriteAllText(csvPath, "round,winner,alive0,alive1,duration\n");
+            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,duration\n");
             Debug.Log("Simulation results: " + csvPath);
         }
 
         SpawnBots();
         StartRound();
+        StartCoroutine(ResolveDamage());
+    }
+    IEnumerator ResolveDamage()
+    {
+        WaitForFixedUpdate wait = new WaitForFixedUpdate();
+        while (true)
+        {
+            yield return wait;
+            foreach (Health h in Health.All) h.ApplyPending();
+        }
     }
 
     void OnDestroy()
@@ -164,7 +175,13 @@ public class RoundManager : MonoBehaviour
             if (h.team == team && !h.IsDead) count++;
         return count;
     }
-
+    int Size(int team)
+    {
+        int count = 0;
+        foreach (Health h in Health.All)
+            if (h.team == team) count++;
+        return count;
+    }
     void EndRound(int alive0, int alive1)
     {
         int winner = -1;
@@ -205,7 +222,8 @@ public class RoundManager : MonoBehaviour
     void LogRound(int winner, int alive0, int alive1, float duration)
     {
         string line = string.Format(CultureInfo.InvariantCulture,
-            "{0},{1},{2},{3},{4:F2}\n", roundsPlayed, winner, alive0, alive1, duration);
+            "{0},{1},{2},{3},{4},{5},{6:F2}\n",
+            roundsPlayed, winner, alive0, alive1, Size(0), Size(1), duration);
         File.AppendAllText(csvPath, line);
     }
 
