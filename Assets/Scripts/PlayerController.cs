@@ -12,12 +12,13 @@ public class PlayerController : MonoBehaviour
     CharacterController controller;
     float verticalVelocity;
     float pitch;
-
+    Health health;
     void Start()
     {
         controller = GetComponent<CharacterController>();
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+        health = GetComponent<Health>();
     }
 
     void Update()
@@ -27,7 +28,7 @@ public class PlayerController : MonoBehaviour
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
-
+        if (health != null && health.IsDead) return;
         Look();
         Move();
     }

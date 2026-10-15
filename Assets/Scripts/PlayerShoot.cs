@@ -3,9 +3,16 @@ using UnityEngine;
 public class PlayerShoot : MonoBehaviour
 {
     public Weapon weapon;
+    Health health;
+
+    void Start()
+    {
+        health = GetComponent<Health>();
+    }
 
     void Update()
     {
+        if (health != null && health.IsDead) return;
         if (Cursor.lockState != CursorLockMode.Locked) return;
 
         bool pressed = weapon.automatic
