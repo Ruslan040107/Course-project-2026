@@ -13,6 +13,9 @@ public class RoundManager : MonoBehaviour
     public Health player;
     public Camera overviewCamera;
     public Material[] teamMaterials;
+    [Header("Stealth")]
+    public int stealthLevel0;
+    public int stealthLevel1;
 
     [Header("Rules")]
     public int botsPerTeam = 5;
@@ -63,7 +66,7 @@ public class RoundManager : MonoBehaviour
             Directory.CreateDirectory(dir);
 
             csvPath = Path.Combine(dir, "sim_" + stamp + ".csv");
-            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,duration\n");
+            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,duration\n");
             Debug.Log("Simulation results: " + csvPath);
         }
 
@@ -122,6 +125,9 @@ public class RoundManager : MonoBehaviour
                 GameObject bot = Instantiate(botPrefab, point.position + Vector3.up, point.rotation);
                 bot.name = "Bot_T" + team + "_" + i;
                 bot.GetComponent<Health>().team = team;
+                Stealth st = bot.GetComponent<Stealth>();
+                if (st == null) st = bot.AddComponent<Stealth>();
+                st.level = team == 0 ? stealthLevel0 : stealthLevel1;
 
                 if (teamMaterials != null && team < teamMaterials.Length)
                     foreach (Renderer r in bot.GetComponentsInChildren<Renderer>())
@@ -231,8 +237,9 @@ public class RoundManager : MonoBehaviour
     void LogRound(int winner, int alive0, int alive1, float duration)
     {
         string line = string.Format(CultureInfo.InvariantCulture,
-            "{0},{1},{2},{3},{4},{5},{6:F2}\n",
-            roundsPlayed, winner, alive0, alive1, Size(0), Size(1), duration);
+            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2}\n",
+            roundsPlayed, winner, alive0, alive1, Size(0), Size(1),
+            stealthLevel0, stealthLevel1, duration);
         File.AppendAllText(csvPath, line);
     }
 

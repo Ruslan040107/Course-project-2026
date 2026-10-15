@@ -21,7 +21,8 @@ public class Weapon : MonoBehaviour
     {
         if (Time.time < nextShotTime) return false;
         nextShotTime = Time.time + 1f / fireRate;
-
+        Stealth st = GetComponentInParent<Stealth>();
+        if (st != null) st.Reveal();
         Quaternion spread = Quaternion.Euler(
             Random.Range(-spreadAngle, spreadAngle),
             Random.Range(-spreadAngle, spreadAngle),

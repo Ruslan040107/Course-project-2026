@@ -1902,13 +1902,15 @@ MonoBehaviour:
   teamMaterials:
   - {fileID: 2100000, guid: 156bf692bf50c2840ac1d85de106d1f2, type: 2}
   - {fileID: 2100000, guid: 07089548a40b560438e20ca01d5e7477, type: 2}
+  stealthLevel0: 2
+  stealthLevel1: 2
   botsPerTeam: 5
   roundTime: 60
   breakTime: 3
   roundsToWin: 5
   simulation: 1
   simTimeScale: 10
-  roundsToSimulate: 20
+  roundsToSimulate: 10000
   simBreakTime: 0.2
   score: 0000000000000000i
 --- !u!4 &1833081732

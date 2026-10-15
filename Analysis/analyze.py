@@ -19,3 +19,5 @@ print(f"p(team0) = {p:.3f}, 95% CI [{p - 1.96 * se:.3f}, {p + 1.96 * se:.3f}]")
 print(f"z = {z:.2f}:", "no evidence of imbalance" if abs(z) < 1.96 else "IMBALANCED")
 print(f"mean round length: {df['duration'].mean():.1f} s")
 print("team sizes:", sorted(int(x) for x in df["size0"].unique()), sorted(int(x) for x in df["size1"].unique()))
+if "stealth0" in df:
+    print("stealth levels:", sorted(int(x) for x in df["stealth0"].unique()), sorted(int(x) for x in df["stealth1"].unique()))
