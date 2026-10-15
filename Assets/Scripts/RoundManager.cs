@@ -53,7 +53,16 @@ public class RoundManager : MonoBehaviour
             Time.timeScale = simTimeScale;
 
             string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-            csvPath = Path.Combine(Application.persistentDataPath, "sim_" + stamp + ".csv");
+
+            string dir;
+            #if UNITY_EDITOR
+            dir = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Analysis", "data");
+            #else
+            dir = Application.persistentDataPath;
+            #endif
+            Directory.CreateDirectory(dir);
+
+            csvPath = Path.Combine(dir, "sim_" + stamp + ".csv");
             File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,duration\n");
             Debug.Log("Simulation results: " + csvPath);
         }
