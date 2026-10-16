@@ -17,14 +17,28 @@ public class PlayerController : MonoBehaviour
     public float heightChangeSpeed = 6f;
     public float standCameraY = 0.6f;
     public float crouchCameraY = 0.05f;
-    public float StandFactor => Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
-    public float SpreadFactor(float crouchFactor) => Mathf.Lerp(crouchFactor, 1f, StandFactor);
+
+    [Header("Camera bob")]
+    public float bobFrequency = 9f;
+    public float bobHeight = 0.04f;
+    public float bobSide = 0.025f;
+    public float bobSmoothing = 10f;
 
     CharacterController controller;
     Health health;
     float verticalVelocity;
     float pitch;
     float currentHeight;
+    float bobTimer;
+    float bobBlend;
+    float moveAmount;
+
+    public float StandFactor => Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
+
+    public float SpreadFactor(float crouchFactor)
+    {
+        return Mathf.Lerp(crouchFactor, 1f, StandFactor);
+    }
 
     void Start()
     {
@@ -58,8 +72,17 @@ public class PlayerController : MonoBehaviour
         controller.height = currentHeight;
         controller.center = new Vector3(0f, (currentHeight - standHeight) * 0.5f, 0f);
 
-        float k = Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
-        cameraTransform.localPosition = new Vector3(0f, Mathf.Lerp(crouchCameraY, standCameraY, k), 0f);
+        float k = StandFactor;
+        float baseY = Mathf.Lerp(crouchCameraY, standCameraY, k);
+
+        float bobTarget = controller.isGrounded ? moveAmount * Mathf.Lerp(crouchSpeedFactor, 1f, k) : 0f;
+        bobBlend = Mathf.MoveTowards(bobBlend, bobTarget, bobSmoothing * Time.deltaTime);
+        bobTimer += Time.deltaTime * bobFrequency * bobBlend;
+
+        float offsetX = Mathf.Cos(bobTimer) * bobSide * bobBlend;
+        float offsetY = Mathf.Sin(bobTimer * 2f) * bobHeight * bobBlend;
+
+        cameraTransform.localPosition = new Vector3(offsetX, baseY + offsetY, 0f);
     }
 
     void Look()
@@ -79,8 +102,9 @@ public class PlayerController : MonoBehaviour
 
         Vector3 move = transform.right * x + transform.forward * z;
         if (move.magnitude > 1f) move.Normalize();
+        moveAmount = move.magnitude;
 
-        float k = Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
+        float k = StandFactor;
         float speed = moveSpeed * Mathf.Lerp(crouchSpeedFactor, 1f, k);
 
         if (controller.isGrounded && verticalVelocity < 0f)
