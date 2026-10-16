@@ -18,11 +18,30 @@ public class PlayerController : MonoBehaviour
     public float standCameraY = 0.6f;
     public float crouchCameraY = 0.05f;
 
+    [Header("Sneak (Shift)")]
+    public KeyCode sneakKey = KeyCode.LeftShift;
+    public float sneakSpeedFactor = 0.5f;
+
+    [Header("Spread multipliers (1 = weapon spreadAngle)")]
+    public float crouchSpread = 0.4f;
+    public float sneakSpread = 0.6f;
+    public float standSpread = 0.8f;
+    public float runSpread = 1f;
+    public float airSpread = 2f;
+    public float spreadChangeSpeed = 6f;
+
     [Header("Camera bob")]
     public float bobFrequency = 9f;
     public float bobHeight = 0.04f;
     public float bobSide = 0.025f;
     public float bobSmoothing = 10f;
+
+    [Header("Recoil (degrees)")]
+    public float recoilUp = 0.6f;
+    public float recoilSide = 0.25f;
+    public float recoilRoll = 0.5f;
+    public float recoilMax = 5f;
+    public float recoilReturnSpeed = 9f;
 
     CharacterController controller;
     Health health;
@@ -32,12 +51,31 @@ public class PlayerController : MonoBehaviour
     float bobTimer;
     float bobBlend;
     float moveAmount;
+    float spreadNow = 1f;
+    float kickPitch;
+    float kickYaw;
+    float kickRoll;
+
+    public bool IsCrouching => StandFactor < 0.5f;
+    public bool IsSneaking { get; private set; }
+    public bool IsMoving => moveAmount > 0.1f;
+
+    // for the future sound system: true when the player makes no noise
+    public bool IsSilent => controller != null && controller.isGrounded && (!IsMoving || IsSneaking || IsCrouching);
 
     public float StandFactor => Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
 
-    public float SpreadFactor(float crouchFactor)
+    // current spread multiplier, the weapon multiplies its spreadAngle by it
+    public float SpreadMultiplier => spreadNow;
+
+    void OnEnable()
     {
-        return Mathf.Lerp(crouchFactor, 1f, StandFactor);
+        Weapon.AnyShot += OnShot;
+    }
+
+    void OnDisable()
+    {
+        Weapon.AnyShot -= OnShot;
     }
 
     void Start()
@@ -47,6 +85,15 @@ public class PlayerController : MonoBehaviour
         currentHeight = standHeight;
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+    }
+
+    void OnShot(ShotInfo shot)
+    {
+        if (health == null || shot.shooter != health) return;
+
+        kickPitch = Mathf.Min(kickPitch + recoilUp * Random.Range(0.8f, 1.2f), recoilMax);
+        kickYaw = Mathf.Clamp(kickYaw + Random.Range(-recoilSide, recoilSide), -recoilMax, recoilMax);
+        kickRoll = Mathf.Clamp(kickRoll + Random.Range(-recoilRoll, recoilRoll), -recoilMax, recoilMax);
     }
 
     void Update()
@@ -59,9 +106,12 @@ public class PlayerController : MonoBehaviour
 
         if (health != null && health.IsDead) return;
 
+        IsSneaking = Input.GetKey(sneakKey) && controller.isGrounded;
+
         UpdateCrouch();
         Look();
         Move();
+        UpdateSpread();
     }
 
     void UpdateCrouch()
@@ -75,7 +125,7 @@ public class PlayerController : MonoBehaviour
         float k = StandFactor;
         float baseY = Mathf.Lerp(crouchCameraY, standCameraY, k);
 
-        float bobTarget = controller.isGrounded ? moveAmount * Mathf.Lerp(crouchSpeedFactor, 1f, k) : 0f;
+        float bobTarget = controller.isGrounded ? moveAmount * SpeedFactor() : 0f;
         bobBlend = Mathf.MoveTowards(bobBlend, bobTarget, bobSmoothing * Time.deltaTime);
         bobTimer += Time.deltaTime * bobFrequency * bobBlend;
 
@@ -85,6 +135,26 @@ public class PlayerController : MonoBehaviour
         cameraTransform.localPosition = new Vector3(offsetX, baseY + offsetY, 0f);
     }
 
+    float SpeedFactor()
+    {
+        float f = Mathf.Lerp(crouchSpeedFactor, 1f, StandFactor);
+        if (IsSneaking) f *= sneakSpeedFactor;
+        return f;
+    }
+
+    void UpdateSpread()
+    {
+        float target;
+
+        if (!controller.isGrounded) target = airSpread;
+        else if (IsCrouching) target = crouchSpread;
+        else if (IsSneaking) target = sneakSpread;
+        else if (!IsMoving) target = standSpread;
+        else target = runSpread;
+
+        spreadNow = Mathf.MoveTowards(spreadNow, target, spreadChangeSpeed * Time.deltaTime);
+    }
+
     void Look()
     {
         float mx = Input.GetAxis("Mouse X") * mouseSensitivity;
@@ -92,7 +162,13 @@ public class PlayerController : MonoBehaviour
 
         transform.Rotate(0f, mx, 0f);
         pitch = Mathf.Clamp(pitch - my, -85f, 85f);
-        cameraTransform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+
+        float t = 1f - Mathf.Exp(-recoilReturnSpeed * Time.deltaTime);
+        kickPitch = Mathf.Lerp(kickPitch, 0f, t);
+        kickYaw = Mathf.Lerp(kickYaw, 0f, t);
+        kickRoll = Mathf.Lerp(kickRoll, 0f, t);
+
+        cameraTransform.localRotation = Quaternion.Euler(pitch - kickPitch, kickYaw, kickRoll);
     }
 
     void Move()
@@ -104,8 +180,7 @@ public class PlayerController : MonoBehaviour
         if (move.magnitude > 1f) move.Normalize();
         moveAmount = move.magnitude;
 
-        float k = StandFactor;
-        float speed = moveSpeed * Mathf.Lerp(crouchSpeedFactor, 1f, k);
+        float speed = moveSpeed * SpeedFactor();
 
         if (controller.isGrounded && verticalVelocity < 0f)
             verticalVelocity = -2f;

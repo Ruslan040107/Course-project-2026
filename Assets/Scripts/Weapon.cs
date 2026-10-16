@@ -16,8 +16,7 @@ public class Weapon : MonoBehaviour
 {
     public static event System.Action<ShotInfo> AnyShot;
     public event System.Action ReloadStarted;
-    
-    [Range(0f, 1f)] public float crouchSpreadFactor = 0.4f;
+
     PlayerController movement;
 
     [Header("Info")]
@@ -107,7 +106,7 @@ public class Weapon : MonoBehaviour
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
 
-        float spreadNow = spreadAngle * (movement != null ? movement.SpreadFactor(crouchSpreadFactor) : 1f);
+        float spreadNow = spreadAngle * (movement != null ? movement.SpreadMultiplier : 1f);
         Quaternion spread = Quaternion.Euler(
             Random.Range(-spreadNow, spreadNow),
             Random.Range(-spreadNow, spreadNow),
