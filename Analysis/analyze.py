@@ -21,3 +21,5 @@ print(f"mean round length: {df['duration'].mean():.1f} s")
 print("team sizes:", sorted(int(x) for x in df["size0"].unique()), sorted(int(x) for x in df["size1"].unique()))
 if "stealth0" in df:
     print("stealth levels:", sorted(int(x) for x in df["stealth0"].unique()), sorted(int(x) for x in df["stealth1"].unique()))
+if "penalty" in df:
+    print("penalty / radius / reveal:", df[["penalty", "radius", "reveal"]].iloc[0].tolist())
