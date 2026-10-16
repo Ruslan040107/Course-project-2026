@@ -4,7 +4,7 @@ using UnityEngine;
 public class Health : MonoBehaviour
 {
     public static readonly List<Health> All = new List<Health>();
-    public static event System.Action<Health, Health> AnyKilled;
+    public static event System.Action<Health, Health, bool> AnyKilled;
 
     public int team;
     public float maxHealth = 100f;
@@ -14,6 +14,7 @@ public class Health : MonoBehaviour
 
     float pendingDamage;
     Health pendingAttacker;
+    bool pendingHeadshot;
     GUIStyle style;
 
     public bool IsDead => current <= 0f;
@@ -34,12 +35,13 @@ public class Health : MonoBehaviour
         All.Remove(this);
     }
 
-    public void TakeDamage(float amount, Health attacker = null)
+    public void TakeDamage(float amount, Health attacker = null, bool headshot = false)
     {
         if (IsDead) return;
 
         pendingDamage += amount;
         if (attacker != null) pendingAttacker = attacker;
+        pendingHeadshot = headshot;
     }
 
     public void ApplyPending()
@@ -59,21 +61,23 @@ public class Health : MonoBehaviour
         current = maxHealth;
         pendingDamage = 0f;
         pendingAttacker = null;
+        pendingHeadshot = false;
         gameObject.SetActive(true);
     }
 
     void OnDeath()
     {
         Debug.Log(name + " died");
-        AnyKilled?.Invoke(this, pendingAttacker);
+        AnyKilled?.Invoke(this, pendingAttacker, pendingHeadshot);
         pendingAttacker = null;
+        pendingHeadshot = false;
 
         if (deactivateOnDeath) gameObject.SetActive(false);
     }
 
     void OnGUI()
     {
-        if (!showHud) return;
+        if (!showHud || IsDead) return;
 
         if (style == null)
         {

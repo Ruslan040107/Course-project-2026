@@ -32,6 +32,12 @@ public class BotController : MonoBehaviour
         baseSpeed = agent.speed;
     }
 
+    Vector3 AimPoint(Health t)
+    {
+        Collider c = t.GetComponent<Collider>();
+        return c != null ? c.bounds.center : t.transform.position;
+    }
+
     void OnEnable()
     {
         target = null;
@@ -63,7 +69,7 @@ public class BotController : MonoBehaviour
 
             if (seenTime >= reactionTime)
             {
-                head.LookAt(enemy.transform.position);
+                head.LookAt(AimPoint(enemy));
                 weapon.TryFire();
             }
         }
@@ -71,6 +77,7 @@ public class BotController : MonoBehaviour
         {
             target = null;
             seenTime = 0f;
+            if (weapon.Ammo < weapon.magazineSize) weapon.StartReload();
 
             if (hasLastKnown && Time.time - lastSeenAt < memoryTime)
                 agent.SetDestination(lastKnown);
@@ -128,7 +135,7 @@ public class BotController : MonoBehaviour
     bool CanSee(Health t)
     {
         Vector3 from = head.position;
-        Vector3 toTarget = t.transform.position - from;
+        Vector3 toTarget = AimPoint(t) - from;
         float distance = toTarget.magnitude;
         if (distance < 0.01f) return true;
 

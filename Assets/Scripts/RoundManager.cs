@@ -6,6 +6,7 @@ using System.Collections;
 
 public class RoundManager : MonoBehaviour
 {
+    public static event System.Action RoundStarted;
     [Header("Scene")]
     public Transform spawnRoot0;
     public Transform spawnRoot1;
@@ -146,6 +147,7 @@ public class RoundManager : MonoBehaviour
     {
         Spawn(0, spawnRoot0);
         Spawn(1, spawnRoot1);
+        RoundStarted?.Invoke();
         timer = roundTime;
         inBreak = false;
         message = "";
@@ -163,6 +165,8 @@ public class RoundManager : MonoBehaviour
 
             h.Revive();
             Place(h, point);
+            Weapon w = h.GetComponentInChildren<Weapon>(true);
+            if (w != null) w.ResetAmmo();
         }
     }
 

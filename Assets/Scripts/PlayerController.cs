@@ -9,16 +9,28 @@ public class PlayerController : MonoBehaviour
     public float gravity = -20f;
     public float mouseSensitivity = 2f;
 
+    [Header("Crouch")]
+    public KeyCode crouchKey = KeyCode.C;
+    public float standHeight = 2f;
+    public float crouchHeight = 1.2f;
+    public float crouchSpeedFactor = 0.5f;
+    public float heightChangeSpeed = 6f;
+    public float standCameraY = 0.6f;
+    public float crouchCameraY = 0.05f;
+
     CharacterController controller;
+    Health health;
     float verticalVelocity;
     float pitch;
-    Health health;
+    float currentHeight;
+
     void Start()
     {
         controller = GetComponent<CharacterController>();
+        health = GetComponent<Health>();
+        currentHeight = standHeight;
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
-        health = GetComponent<Health>();
     }
 
     void Update()
@@ -28,9 +40,24 @@ public class PlayerController : MonoBehaviour
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
+
         if (health != null && health.IsDead) return;
+
+        UpdateCrouch();
         Look();
         Move();
+    }
+
+    void UpdateCrouch()
+    {
+        float target = Input.GetKey(crouchKey) ? crouchHeight : standHeight;
+        currentHeight = Mathf.MoveTowards(currentHeight, target, heightChangeSpeed * Time.deltaTime);
+
+        controller.height = currentHeight;
+        controller.center = new Vector3(0f, (currentHeight - standHeight) * 0.5f, 0f);
+
+        float k = Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
+        cameraTransform.localPosition = new Vector3(0f, Mathf.Lerp(crouchCameraY, standCameraY, k), 0f);
     }
 
     void Look()
@@ -51,6 +78,9 @@ public class PlayerController : MonoBehaviour
         Vector3 move = transform.right * x + transform.forward * z;
         if (move.magnitude > 1f) move.Normalize();
 
+        float k = Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
+        float speed = moveSpeed * Mathf.Lerp(crouchSpeedFactor, 1f, k);
+
         if (controller.isGrounded && verticalVelocity < 0f)
             verticalVelocity = -2f;
 
@@ -59,7 +89,7 @@ public class PlayerController : MonoBehaviour
 
         verticalVelocity += gravity * Time.deltaTime;
 
-        Vector3 velocity = move * moveSpeed + Vector3.up * verticalVelocity;
+        Vector3 velocity = move * speed + Vector3.up * verticalVelocity;
         controller.Move(velocity * Time.deltaTime);
     }
 }

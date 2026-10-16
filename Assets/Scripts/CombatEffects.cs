@@ -16,6 +16,7 @@ public class CombatEffects : MonoBehaviour
     public float decalFadeTime = 4f;
 
     [Header("Other")]
+    public Texture2D headshotIcon;
     public float maxEffectDistance = 80f;
 
     class Tracer
@@ -35,6 +36,7 @@ public class CombatEffects : MonoBehaviour
 
     class FeedEntry
     {
+        public bool headshot;
         public string killer, victim;
         public int killerTeam, victimTeam;
         public float expire;
@@ -53,10 +55,11 @@ public class CombatEffects : MonoBehaviour
     float hitMarkerUntil;
     Color hitMarkerColor = Color.white;
     GUIStyle feedStyle;
+    Texture2D headIcon;
 
     void Awake()
     {
-        RoundManager rm = FindAnyObjectByType<RoundManager>();
+        RoundManager rm = FindAnyObjectByType<RoundManager>();  
         if (rm != null && rm.simulation)
         {
             enabled = false;
@@ -67,6 +70,7 @@ public class CombatEffects : MonoBehaviour
 
     void OnDestroy()
     {
+        RoundManager.RoundStarted -= ClearDecals;
         if (!subscribed) return;
         Weapon.AnyShot -= OnShot;
         Health.AnyKilled -= OnKilled;
@@ -80,6 +84,7 @@ public class CombatEffects : MonoBehaviour
 
         holeSprite = MakeSprite(MakeHole(64));
         bloodSprite = MakeSprite(MakeSplat(64));
+        headIcon = headshotIcon != null ? headshotIcon : MakeHeadIcon(32);
 
         flashFx = MakeParticles("Flash", softMat, new Color(1f, 0.9f, 0.6f, 1f), 0.35f, 0.05f, 0f, 0.1f, 0f, 5f);
         sparkFx = MakeParticles("Sparks", softMat, new Color(1f, 0.85f, 0.45f, 1f), 0.04f, 0.4f, 2f, 5f, 1.2f, 35f);
@@ -128,6 +133,7 @@ public class CombatEffects : MonoBehaviour
 
         Weapon.AnyShot += OnShot;
         Health.AnyKilled += OnKilled;
+        RoundManager.RoundStarted += ClearDecals;
         subscribed = true;
     }
 
@@ -232,17 +238,18 @@ public class CombatEffects : MonoBehaviour
         }
     }
 
-    void OnKilled(Health victim, Health killer)
+    void OnKilled(Health victim, Health killer, bool headshot)
     {
-        Burst(bloodFx, victim.transform.position + Vector3.up * 0.4f, Vector3.up, 40);
+        Burst(bloodFx, victim.transform.position + Vector3.up * 0.4f, Vector3.up, headshot ? 55 : 40);
         SpawnFloorBlood(victim.transform.position, 1.1f);
 
         feed.Add(new FeedEntry
         {
-            killer = killer != null ? killer.name : "?",
+            killer = killer != null ? killer.name : "World",
             killerTeam = killer != null ? killer.team : -1,
             victim = victim.name,
             victimTeam = victim.team,
+            headshot = headshot,
             expire = Time.time + 6f
         });
         if (feed.Count > 5) feed.RemoveAt(0);
@@ -352,6 +359,50 @@ public class CombatEffects : MonoBehaviour
         if (team == 1) return new Color(0.4f, 0.6f, 1f);
         return Color.white;
     }
+    
+    void ClearDecals()
+    {
+        foreach (Decal d in decals)
+        {
+            d.sr.enabled = false;
+            d.active = false;
+        }
+        feed.Clear();
+    }
+
+    static Texture2D MakeHeadIcon(int size)
+    {
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 c = new Vector2(size * 0.5f, size * 0.58f);
+        float r = size * 0.38f;
+        Vector2 eyeL = new Vector2(size * 0.37f, size * 0.55f);
+        Vector2 eyeR = new Vector2(size * 0.63f, size * 0.55f);
+        Vector2 hole = new Vector2(size * 0.5f, size * 0.78f);
+
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                Vector2 p = new Vector2(x + 0.5f, y + 0.5f);
+                Color col = Color.clear;
+
+                bool cranium = Vector2.Distance(p, c) < r;
+                bool jaw = Mathf.Abs(p.x - size * 0.5f) < size * 0.2f && p.y > size * 0.12f && p.y < size * 0.35f;
+                if (cranium || jaw) col = Color.white;
+
+                if (Vector2.Distance(p, eyeL) < size * 0.09f || Vector2.Distance(p, eyeR) < size * 0.09f)
+                    col = new Color(0.1f, 0.1f, 0.1f, 1f);
+
+                if (Vector2.Distance(p, hole) < size * 0.07f)
+                    col = new Color(0.9f, 0.1f, 0.1f, 1f);
+
+                tex.SetPixel(x, y, col);
+            }
+
+        tex.Apply();
+        return tex;
+    }
 
     void OnGUI()
     {
@@ -377,6 +428,8 @@ public class CombatEffects : MonoBehaviour
         }
 
         float y = 70f;
+        float icon = 22f;
+
         foreach (FeedEntry e in feed)
         {
             if (Time.time > e.expire) continue;
@@ -387,14 +440,19 @@ public class CombatEffects : MonoBehaviour
             Vector2 sa = feedStyle.CalcSize(a);
             Vector2 sm = feedStyle.CalcSize(m);
             Vector2 sb = feedStyle.CalcSize(b);
-            float x = Screen.width - 20f - (sa.x + sm.x + sb.x);
+            float iconW = e.headshot ? icon + 6f : 0f;
+            float x = Screen.width - 20f - (sa.x + sm.x + iconW + sb.x);
 
             GUI.contentColor = TeamColor(e.killerTeam);
             GUI.Label(new Rect(x, y, sa.x, sa.y), a, feedStyle);
             GUI.contentColor = Color.white;
             GUI.Label(new Rect(x + sa.x, y, sm.x, sm.y), m, feedStyle);
+
+            if (e.headshot && headIcon != null)
+                GUI.DrawTexture(new Rect(x + sa.x + sm.x, y + (sa.y - icon) * 0.5f, icon, icon), headIcon);
+
             GUI.contentColor = TeamColor(e.victimTeam);
-            GUI.Label(new Rect(x + sa.x + sm.x, y, sb.x, sb.y), b, feedStyle);
+            GUI.Label(new Rect(x + sa.x + sm.x + iconW, y, sb.x, sb.y), b, feedStyle);
 
             y += sa.y + 2f;
         }

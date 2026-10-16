@@ -15,6 +15,8 @@ public class PlayerShoot : MonoBehaviour
         if (health != null && health.IsDead) return;
         if (Cursor.lockState != CursorLockMode.Locked) return;
 
+        if (Input.GetKeyDown(KeyCode.R)) weapon.StartReload();
+
         bool pressed = weapon.automatic
             ? Input.GetButton("Fire1")
             : Input.GetButtonDown("Fire1");
