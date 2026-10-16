@@ -3,8 +3,8 @@ using UnityEngine;
 
 public class Health : MonoBehaviour
 {
-    float pendingDamage;
     public static readonly List<Health> All = new List<Health>();
+    public static event System.Action<Health, Health> AnyKilled;
 
     public int team;
     public float maxHealth = 100f;
@@ -12,6 +12,8 @@ public class Health : MonoBehaviour
     public bool deactivateOnDeath = true;
     public bool showHud;
 
+    float pendingDamage;
+    Health pendingAttacker;
     GUIStyle style;
 
     public bool IsDead => current <= 0f;
@@ -27,10 +29,17 @@ public class Health : MonoBehaviour
         All.Remove(this);
     }
 
-    public void TakeDamage(float amount)
+    public void Unregister()
+    {
+        All.Remove(this);
+    }
+
+    public void TakeDamage(float amount, Health attacker = null)
     {
         if (IsDead) return;
+
         pendingDamage += amount;
+        if (attacker != null) pendingAttacker = attacker;
     }
 
     public void ApplyPending()
@@ -47,17 +56,18 @@ public class Health : MonoBehaviour
 
     public void Revive()
     {
-        pendingDamage = 0f;
         current = maxHealth;
+        pendingDamage = 0f;
+        pendingAttacker = null;
         gameObject.SetActive(true);
     }
-    public void Unregister()
-    {
-        All.Remove(this);
-    }
+
     void OnDeath()
     {
         Debug.Log(name + " died");
+        AnyKilled?.Invoke(this, pendingAttacker);
+        pendingAttacker = null;
+
         if (deactivateOnDeath) gameObject.SetActive(false);
     }
 

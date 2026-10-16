@@ -1357,6 +1357,59 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &849740351
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 849740353}
+  - component: {fileID: 849740352}
+  m_Layer: 0
+  m_Name: GameObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &849740352
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 849740351}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5e047d60b6e8b243908c472752990fc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CombatEffects
+  tracerPool: 32
+  tracerSpeed: 250
+  tracerLength: 6
+  tracerWidth: 0.03
+  tracerColor: {r: 1, g: 0.85, b: 0.45, a: 1}
+  decalPool: 80
+  decalLifetime: 25
+  decalFadeTime: 4
+  maxEffectDistance: 80
+--- !u!4 &849740353
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 849740351}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 11.50354, y: 0, z: -1.99143}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &896992178
 GameObject:
   m_ObjectHideFlags: 0
@@ -1911,7 +1964,7 @@ MonoBehaviour:
   roundTime: 60
   breakTime: 3
   roundsToWin: 5
-  simulation: 1
+  simulation: 0
   simTimeScale: 10
   roundsToSimulate: 300
   simBreakTime: 0.2
@@ -2565,3 +2618,4 @@ SceneRoots:
   - {fileID: 2058655062}
   - {fileID: 1833081732}
   - {fileID: 963126996}
+  - {fileID: 849740353}
