@@ -126,7 +126,7 @@ public class RoundManager : MonoBehaviour
             {
                 Transform point = root.GetChild(i % root.childCount);
                 GameObject bot = Instantiate(botPrefab, point.position + Vector3.up, point.rotation);
-                bot.name = "Bot_T" + team + "_" + i;
+                bot.name = (team == 0 ? "T_" : "CT_") + (i + 1);
                 bot.GetComponent<Health>().team = team;
                 Stealth st = bot.GetComponent<Stealth>();
                 if (st == null) st = bot.AddComponent<Stealth>();
@@ -211,7 +211,9 @@ public class RoundManager : MonoBehaviour
 
         if (winner >= 0) score[winner]++;
         roundsPlayed++;
-        message = winner >= 0 ? "Team " + winner + " wins the round" : "Draw";
+        message = winner == 0 ? "Terrorists win the round"
+        : winner == 1 ? "Counter-Terrorists win the round"
+        : "Draw";
 
         if (simulation)
         {
@@ -277,17 +279,29 @@ public class RoundManager : MonoBehaviour
         {
             style = new GUIStyle(GUI.skin.label);
             style.fontSize = 32;
-            style.alignment = TextAnchor.UpperCenter;
             style.normal.textColor = Color.white;
         }
 
-        string top = simulation
-            ? "SIM " + roundsPlayed + "/" + roundsToSimulate + "   " + score[0] + " : " + score[1]
-            : score[0] + " : " + score[1] + "    " + Mathf.CeilToInt(Mathf.Max(timer, 0f)) + " s";
+        float cx = Screen.width / 2f;
+        string center = simulation
+            ? roundsPlayed + "/" + roundsToSimulate
+            : Mathf.CeilToInt(Mathf.Max(timer, 0f)) + " s";
 
-        GUI.Label(new Rect(Screen.width / 2f - 300, 10, 600, 50), top, style);
+        GUI.contentColor = new Color(1f, 0.35f, 0.35f);
+        style.alignment = TextAnchor.UpperRight;
+        GUI.Label(new Rect(cx - 260, 10, 180, 50), "T  " + score[0], style);
 
+        GUI.contentColor = Color.white;
+        style.alignment = TextAnchor.UpperCenter;
+        GUI.Label(new Rect(cx - 70, 10, 140, 50), center, style);
+
+        GUI.contentColor = new Color(0.4f, 0.6f, 1f);
+        style.alignment = TextAnchor.UpperLeft;
+        GUI.Label(new Rect(cx + 80, 10, 180, 50), score[1] + "  CT", style);
+
+        GUI.contentColor = Color.white;
+        style.alignment = TextAnchor.UpperCenter;
         if (message != "")
-            GUI.Label(new Rect(Screen.width / 2f - 300, 70, 600, 100), message, style);
+            GUI.Label(new Rect(cx - 300, 70, 600, 100), message, style);
     }
 }

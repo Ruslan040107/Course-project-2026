@@ -1036,7 +1036,7 @@ GameObject:
   m_Component:
   - component: {fileID: 459558111}
   m_Layer: 0
-  m_Name: SpawnsA
+  m_Name: T Spawn
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1900,17 +1900,20 @@ MonoBehaviour:
   player: {fileID: 1913474542}
   overviewCamera: {fileID: 963126995}
   teamMaterials:
-  - {fileID: 2100000, guid: 156bf692bf50c2840ac1d85de106d1f2, type: 2}
   - {fileID: 2100000, guid: 07089548a40b560438e20ca01d5e7477, type: 2}
-  stealthLevel0: 2
-  stealthLevel1: 2
+  - {fileID: 2100000, guid: 156bf692bf50c2840ac1d85de106d1f2, type: 2}
+  stealthLevel0: 0
+  stealthLevel1: 3
+  speedPenalty: 0.1
+  radiusFactor: 0.7
+  revealTime: 1
   botsPerTeam: 5
   roundTime: 60
   breakTime: 3
   roundsToWin: 5
   simulation: 1
   simTimeScale: 10
-  roundsToSimulate: 10000
+  roundsToSimulate: 300
   simBreakTime: 0.2
   score: 0000000000000000i
 --- !u!4 &1833081732
@@ -2409,7 +2412,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2058655062}
   m_Layer: 0
-  m_Name: SpawnsB
+  m_Name: CT Spawn
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
