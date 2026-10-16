@@ -563,6 +563,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 646c8569340ed6444b434a4dddcc4a7e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Weapon
+  crouchSpreadFactor: 0.4
   weaponName: M4A4
   muzzle: {fileID: 330585546}
   damage: 25
@@ -2422,7 +2423,7 @@ MonoBehaviour:
   speedPenalty: 0.1
   radiusFactor: 0.7
   revealTime: 1
-  botsPerTeam: 3
+  botsPerTeam: 1
   roundTime: 60
   breakTime: 3
   roundsToWin: 5

@@ -11,6 +11,7 @@ public class Health : MonoBehaviour
     public float current;
     public bool deactivateOnDeath = true;
     public bool showHud;
+    public event System.Action<Health> Damaged;
 
     float pendingDamage;
     Health pendingAttacker;
@@ -18,11 +19,25 @@ public class Health : MonoBehaviour
     GUIStyle style;
 
     public bool IsDead => current <= 0f;
+    Renderer[] bodyRenderers;
+    Collider[] bodyColliders;
+
+    void SetBodyVisible(bool visible)
+    {
+        if (bodyRenderers == null) return;
+        foreach (Renderer r in bodyRenderers) r.enabled = visible;
+        foreach (Collider c in bodyColliders) c.enabled = visible;
+    }
 
     void Awake()
     {
         current = maxHealth;
         All.Add(this);
+        if (!deactivateOnDeath)
+        {
+            bodyRenderers = GetComponentsInChildren<Renderer>(true);
+            bodyColliders = GetComponentsInChildren<Collider>(true);
+        }
     }
 
     void OnDestroy()
@@ -38,7 +53,7 @@ public class Health : MonoBehaviour
     public void TakeDamage(float amount, Health attacker = null, bool headshot = false)
     {
         if (IsDead) return;
-
+        if (attacker != null) Damaged?.Invoke(attacker);
         pendingDamage += amount;
         if (attacker != null) pendingAttacker = attacker;
         pendingHeadshot = headshot;
@@ -62,6 +77,7 @@ public class Health : MonoBehaviour
         pendingDamage = 0f;
         pendingAttacker = null;
         pendingHeadshot = false;
+        SetBodyVisible(true);
         gameObject.SetActive(true);
     }
 
@@ -73,6 +89,8 @@ public class Health : MonoBehaviour
         pendingHeadshot = false;
 
         if (deactivateOnDeath) gameObject.SetActive(false);
+        if (deactivateOnDeath) gameObject.SetActive(false);
+        else SetBodyVisible(false);
     }
 
     void OnGUI()

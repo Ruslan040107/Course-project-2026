@@ -13,6 +13,8 @@ public class BotController : MonoBehaviour
     public float turnSpeed = 8f;
     public float memoryTime = 4f;
     public float arenaHalfSize = 22f;
+    public float alertTime = 2f;
+    float alertUntil;
 
     NavMeshAgent agent;
     Health self;
@@ -43,6 +45,22 @@ public class BotController : MonoBehaviour
         target = null;
         hasLastKnown = false;
         seenTime = 0f;
+        alertUntil = 0f;
+        self.Damaged += OnDamaged;
+    }
+
+    void OnDisable()
+    {
+        self.Damaged -= OnDamaged;
+    }
+
+    void OnDamaged(Health attacker)
+    {
+        if (attacker.team == self.team) return;
+        alertUntil = Time.time + alertTime;
+        lastKnown = attacker.transform.position;
+        hasLastKnown = true;
+        lastSeenAt = Time.time;
     }
 
     void FixedUpdate()
@@ -146,9 +164,9 @@ public class BotController : MonoBehaviour
 
         Vector3 flat = toTarget;
         flat.y = 0f;
-        if (flat.sqrMagnitude > 0.0001f && Vector3.Angle(transform.forward, flat) > fieldOfView * 0.5f)
+        bool alerted = Time.time < alertUntil;
+        if (!alerted && flat.sqrMagnitude > 0.0001f && Vector3.Angle(transform.forward, flat) > fieldOfView * 0.5f)
             return false;
-
         if (Physics.Raycast(from, toTarget / distance, out RaycastHit hit, radius))
             return hit.collider.GetComponentInParent<Health>() == t;
 

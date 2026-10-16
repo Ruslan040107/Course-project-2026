@@ -17,6 +17,8 @@ public class PlayerController : MonoBehaviour
     public float heightChangeSpeed = 6f;
     public float standCameraY = 0.6f;
     public float crouchCameraY = 0.05f;
+    public float StandFactor => Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
+    public float SpreadFactor(float crouchFactor) => Mathf.Lerp(crouchFactor, 1f, StandFactor);
 
     CharacterController controller;
     Health health;
