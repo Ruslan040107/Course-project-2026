@@ -21,6 +21,10 @@ public class RoundManager : MonoBehaviour
     public float radiusFactor = 0.5f;
     public float revealTime = 1f;
 
+    [Header("Weapons (bots; leave empty to keep the prefab weapon)")]
+    public WeaponData weaponTeam0;
+    public WeaponData weaponTeam1;
+
     [Header("Rules")]
     public int botsPerTeam = 5;
     public float roundTime = 60f;
@@ -70,7 +74,7 @@ public class RoundManager : MonoBehaviour
             Directory.CreateDirectory(dir);
 
             csvPath = Path.Combine(dir, "sim_" + stamp + ".csv");
-            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration\n");
+            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1\n");
             Debug.Log("Simulation results: " + csvPath);
         }
 
@@ -166,7 +170,12 @@ public class RoundManager : MonoBehaviour
             h.Revive();
             Place(h, point);
             Weapon w = h.GetComponentInChildren<Weapon>(true);
-            if (w != null) w.ResetAmmo();
+            if (w != null)
+            {
+                WeaponData d = team == 0 ? weaponTeam0 : weaponTeam1;
+                if (d != null && h.GetComponent<PlayerLoadout>() == null) w.Equip(d);
+                w.ResetAmmo();
+            }
         }
     }
 
@@ -249,9 +258,11 @@ public class RoundManager : MonoBehaviour
     void LogRound(int winner, int alive0, int alive1, float duration)
     {
         string line = string.Format(CultureInfo.InvariantCulture,
-            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2}\n",
+            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2},{12},{13}\n",
             roundsPlayed, winner, alive0, alive1, Size(0), Size(1),
-            stealthLevel0, stealthLevel1, speedPenalty, radiusFactor, revealTime, duration);
+            stealthLevel0, stealthLevel1, speedPenalty, radiusFactor, revealTime, duration,
+            weaponTeam0 != null ? weaponTeam0.weaponName : "default",
+            weaponTeam1 != null ? weaponTeam1.weaponName : "default");
         File.AppendAllText(csvPath, line);
     }
 

@@ -66,7 +66,8 @@ public class BotController : MonoBehaviour
     void FixedUpdate()
     {
         if (stealth == null) stealth = GetComponent<Stealth>();
-        agent.speed = stealth != null ? baseSpeed * stealth.SpeedFactor() : baseSpeed;
+        float weaponFactor = weapon != null ? weapon.moveSpeedFactor : 1f;
+        agent.speed = stealth != null ? baseSpeed * weaponFactor * stealth.SpeedFactor() : baseSpeed * weaponFactor;
 
         Health enemy = FindVisibleEnemy();
 

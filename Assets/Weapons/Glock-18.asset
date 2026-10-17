@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c026ee1111f40f046be8a19334988210, type: 3}
+  m_Name: Glock-18
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponName: Glock-18
+  category: 0
+  price: 200
+  killReward: 300
+  damage: 30
+  headMultiplier: 4
+  legMultiplier: 0.75
+  range: 100
+  fireRate: 6.7
+  automatic: 0
+  drawTime: 0.5
+  spreadAngle: 1
+  recoil: 0.5
+  magazineSize: 20
+  reserveAmmo: 120
+  reloadTime: 2.3
+  moveSpeedFactor: 0.96
+  melee: 0
+  meleeRange: 2
+  secondaryDamage: 65
+  secondaryInterval: 1
+  backstabDamage: 180
+  scopeFov: []
+  unscopedSpreadMultiplier: 1
+  scopedMoveFactor: 0.5

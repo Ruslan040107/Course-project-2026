@@ -204,18 +204,23 @@ public class CombatEffects : MonoBehaviour
         else
             muzzlePos += s.muzzle.forward * 0.6f;
 
-        Vector3 toEnd = s.end - muzzlePos;
-        float dist = toEnd.magnitude;
-        if (dist > 1f) SpawnTracer(muzzlePos, toEnd / dist, dist);
+        if (!s.melee)
+        {
+            Vector3 toEnd = s.end - muzzlePos;
+            float dist = toEnd.magnitude;
+            if (dist > 1f) SpawnTracer(muzzlePos, toEnd / dist, dist);
 
-        Burst(flashFx, muzzlePos, s.muzzle.forward, 2);
-        flashLight.transform.position = muzzlePos;
-        flashLight.enabled = true;
-        flashTimer = 0.05f;
+            Burst(flashFx, muzzlePos, s.muzzle.forward, 2);
+            flashLight.transform.position = muzzlePos;
+            flashLight.enabled = true;
+            flashTimer = 0.05f;
+        }
 
         if (!s.hit) return;
 
         bool damaging = s.target != null && s.shooter != null && s.target.team != s.shooter.team;
+
+        if (s.melee && !damaging) return;
 
         if (damaging)
         {

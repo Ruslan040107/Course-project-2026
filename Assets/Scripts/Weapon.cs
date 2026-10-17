@@ -10,6 +10,8 @@ public struct ShotInfo
     public Health shooter;
     public Health target;
     public Transform muzzle;
+    public float recoil;
+    public bool melee;
 }
 
 public class Weapon : MonoBehaviour
@@ -18,6 +20,9 @@ public class Weapon : MonoBehaviour
     public event System.Action ReloadStarted;
 
     PlayerController movement;
+
+    [Header("Data (optional, overrides the values below)")]
+    public WeaponData data;
 
     [Header("Info")]
     public string weaponName = "Rifle";
@@ -41,6 +46,16 @@ public class Weapon : MonoBehaviour
     public int reserveAmmo = 90;
     public float reloadTime = 2.2f;
 
+    [Header("Other")]
+    public float botSpreadMultiplier = 2f;
+    public float moveSpeedFactor = 1f;
+    public float recoilFactor = 1f;
+
+    public bool IsMelee => data != null && data.melee;
+
+    // set by PlayerShoot; bots are always treated as scoped
+    public bool Scoped { get; set; } = true;
+
     float nextShotTime;
     float reloadEnd;
     int ammo;
@@ -57,7 +72,38 @@ public class Weapon : MonoBehaviour
     {
         movement = GetComponentInParent<PlayerController>();
         owner = GetComponentInParent<Health>();
+        if (data != null) CopyData();
         ResetAmmo();
+    }
+
+    void CopyData()
+    {
+        weaponName = data.weaponName;
+        damage = data.damage;
+        headMultiplier = data.headMultiplier;
+        legMultiplier = data.legMultiplier;
+        range = data.range;
+        fireRate = data.fireRate;
+        automatic = data.automatic;
+        spreadAngle = data.spreadAngle;
+        recoilFactor = data.recoil;
+        magazineSize = data.magazineSize;
+        reserveAmmo = data.reserveAmmo;
+        reloadTime = data.reloadTime;
+        moveSpeedFactor = data.moveSpeedFactor;
+    }
+
+    // ammoNow / reserveNow below 0 means a full magazine and full reserve
+    public void Equip(WeaponData newData, int ammoNow = -1, int reserveNow = -1)
+    {
+        data = newData;
+        if (data != null) CopyData();
+
+        ResetAmmo();
+        if (ammoNow >= 0) ammo = Mathf.Min(ammoNow, magazineSize);
+        if (reserveNow >= 0) reserve = reserveNow;
+
+        if (data != null) nextShotTime = Time.time + data.drawTime;
     }
 
     public void ResetAmmo()
@@ -90,6 +136,8 @@ public class Weapon : MonoBehaviour
 
     public bool TryFire()
     {
+        if (IsMelee) return Melee(false);
+
         FinishReload();
         if (reloading) return false;
 
@@ -106,7 +154,11 @@ public class Weapon : MonoBehaviour
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
 
-        float spreadNow = spreadAngle * (movement != null ? movement.SpreadMultiplier : 1f);
+        float mult = movement != null ? movement.SpreadMultiplier : botSpreadMultiplier;
+        if (data != null && data.scopeFov != null && data.scopeFov.Length > 0 && !Scoped)
+            mult *= data.unscopedSpreadMultiplier;
+
+        float spreadNow = spreadAngle * mult;
         Quaternion spread = Quaternion.Euler(
             Random.Range(-spreadNow, spreadNow),
             Random.Range(-spreadNow, spreadNow),
@@ -118,7 +170,8 @@ public class Weapon : MonoBehaviour
             origin = muzzle.position,
             end = muzzle.position + direction * range,
             shooter = owner,
-            muzzle = muzzle
+            muzzle = muzzle,
+            recoil = recoilFactor
         };
 
         if (Physics.Raycast(muzzle.position, direction, out RaycastHit hit, range))
@@ -154,6 +207,59 @@ public class Weapon : MonoBehaviour
             shot.target = target;
 
             Debug.DrawLine(muzzle.position, hit.point, Color.red, 0.1f);
+        }
+
+        AnyShot?.Invoke(shot);
+        return true;
+    }
+
+    // right click with the knife
+    public bool TrySecondary()
+    {
+        return IsMelee && Melee(true);
+    }
+
+    bool Melee(bool stab)
+    {
+        if (Time.time < nextShotTime) return false;
+        nextShotTime = Time.time + (stab ? data.secondaryInterval : 1f / Mathf.Max(fireRate, 0.01f));
+
+        Stealth st = GetComponentInParent<Stealth>();
+        if (st != null) st.Reveal();
+
+        Vector3 origin = muzzle.position;
+        Vector3 dir = muzzle.forward;
+
+        ShotInfo shot = new ShotInfo
+        {
+            origin = origin,
+            end = origin + dir * data.meleeRange,
+            shooter = owner,
+            muzzle = muzzle,
+            melee = true
+        };
+
+        if (Physics.SphereCast(origin, 0.2f, dir, out RaycastHit hit, data.meleeRange))
+        {
+            Health target = hit.collider.GetComponentInParent<Health>();
+            bool friendly = owner != null && target != null && target.team == owner.team;
+
+            if (target != null && owner != null && target != owner && !friendly && !target.IsDead)
+            {
+                float dmg = stab ? data.secondaryDamage : damage;
+
+                Vector3 toTarget = target.transform.position - owner.transform.position;
+                toTarget.y = 0f;
+                if (toTarget.sqrMagnitude > 0.01f && Vector3.Dot(target.transform.forward, toTarget.normalized) > 0.5f)
+                    dmg = stab ? data.backstabDamage : data.backstabDamage * 0.5f;
+
+                target.TakeDamage(dmg, owner, false);
+            }
+
+            shot.end = hit.point;
+            shot.normal = hit.normal;
+            shot.hit = true;
+            shot.target = target;
         }
 
         AnyShot?.Invoke(shot);

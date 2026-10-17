@@ -38,13 +38,17 @@ public class PlayerController : MonoBehaviour
 
     [Header("Recoil (degrees)")]
     public float recoilUp = 0.6f;
-    public float recoilSide = 0.25f;
-    public float recoilRoll = 0.5f;
-    public float recoilMax = 5f;
-    public float recoilReturnSpeed = 9f;
+    public float recoilSide = 0.5f;
+    public float recoilRoll = 0.25f;
+    public float recoilMax = 14f;
+    public float recoilRecoveryDelay = 0.15f;
+    public float recoilReturnSpeed = 5f;
+    public float sprayResetTime = 0.35f;
 
     CharacterController controller;
     Health health;
+    PlayerShoot shoot;
+    Weapon weapon;
     float verticalVelocity;
     float pitch;
     float currentHeight;
@@ -55,6 +59,8 @@ public class PlayerController : MonoBehaviour
     float kickPitch;
     float kickYaw;
     float kickRoll;
+    float lastShotTime = -10f;
+    int sprayIndex;
 
     public bool IsCrouching => StandFactor < 0.5f;
     public bool IsSneaking { get; private set; }
@@ -82,6 +88,8 @@ public class PlayerController : MonoBehaviour
     {
         controller = GetComponent<CharacterController>();
         health = GetComponent<Health>();
+        shoot = GetComponent<PlayerShoot>();
+        weapon = shoot != null ? shoot.weapon : GetComponentInChildren<Weapon>();
         currentHeight = standHeight;
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
@@ -89,11 +97,21 @@ public class PlayerController : MonoBehaviour
 
     void OnShot(ShotInfo shot)
     {
-        if (health == null || shot.shooter != health) return;
+        if (health == null || shot.shooter != health || shot.melee) return;
 
-        kickPitch = Mathf.Min(kickPitch + recoilUp * Random.Range(0.8f, 1.2f), recoilMax);
-        kickYaw = Mathf.Clamp(kickYaw + Random.Range(-recoilSide, recoilSide), -recoilMax, recoilMax);
-        kickRoll = Mathf.Clamp(kickRoll + Random.Range(-recoilRoll, recoilRoll), -recoilMax, recoilMax);
+        if (Time.time - lastShotTime > sprayResetTime) sprayIndex = 0;
+        lastShotTime = Time.time;
+
+        float r = shot.recoil > 0f ? shot.recoil : 1f;
+
+        // the first shots kick up hard, later ones less, and the sideways kick follows a fixed wave: a learnable spray pattern
+        float up = recoilUp * r * Mathf.Lerp(1f, 0.5f, Mathf.Clamp01(sprayIndex / 15f));
+        float side = recoilSide * r * Mathf.Sin(sprayIndex * 0.8f);
+
+        kickPitch = Mathf.Min(kickPitch + up * Random.Range(0.9f, 1.1f), recoilMax);
+        kickYaw = Mathf.Clamp(kickYaw + side, -recoilMax * 0.5f, recoilMax * 0.5f);
+        kickRoll = Mathf.Clamp(kickRoll + Random.Range(-recoilRoll, recoilRoll) * r, -3f, 3f);
+        sprayIndex++;
     }
 
     void Update()
@@ -139,6 +157,13 @@ public class PlayerController : MonoBehaviour
     {
         float f = Mathf.Lerp(crouchSpeedFactor, 1f, StandFactor);
         if (IsSneaking) f *= sneakSpeedFactor;
+
+        if (weapon != null)
+        {
+            f *= weapon.moveSpeedFactor;
+            if (shoot != null && shoot.IsScoped && weapon.data != null) f *= weapon.data.scopedMoveFactor;
+        }
+
         return f;
     }
 
@@ -157,16 +182,21 @@ public class PlayerController : MonoBehaviour
 
     void Look()
     {
-        float mx = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float my = Input.GetAxis("Mouse Y") * mouseSensitivity;
+        float sens = mouseSensitivity * (shoot != null ? shoot.SensitivityFactor : 1f);
+        float mx = Input.GetAxis("Mouse X") * sens;
+        float my = Input.GetAxis("Mouse Y") * sens;
 
         transform.Rotate(0f, mx, 0f);
         pitch = Mathf.Clamp(pitch - my, -85f, 85f);
 
-        float t = 1f - Mathf.Exp(-recoilReturnSpeed * Time.deltaTime);
-        kickPitch = Mathf.Lerp(kickPitch, 0f, t);
-        kickYaw = Mathf.Lerp(kickYaw, 0f, t);
-        kickRoll = Mathf.Lerp(kickRoll, 0f, t);
+        // while the weapon is firing the kick stays, it only recovers after the shooting stops
+        if (Time.time - lastShotTime > recoilRecoveryDelay)
+        {
+            float t = 1f - Mathf.Exp(-recoilReturnSpeed * Time.deltaTime);
+            kickPitch = Mathf.Lerp(kickPitch, 0f, t);
+            kickYaw = Mathf.Lerp(kickYaw, 0f, t);
+            kickRoll = Mathf.Lerp(kickRoll, 0f, t);
+        }
 
         cameraTransform.localRotation = Quaternion.Euler(pitch - kickPitch, kickYaw, kickRoll);
     }
