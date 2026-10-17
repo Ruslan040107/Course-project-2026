@@ -14,6 +14,7 @@ public class BotController : MonoBehaviour
     public float memoryTime = 4f;
     public float arenaHalfSize = 22f;
     public float alertTime = 2f;
+    [Tooltip("bots with a sniper rifle do not scope closer than this")] public float noScopeDistance = 8f;
     float alertUntil;
 
     NavMeshAgent agent;
@@ -89,6 +90,9 @@ public class BotController : MonoBehaviour
             if (seenTime >= reactionTime)
             {
                 head.LookAt(AimPoint(enemy));
+                weapon.Scoped = distance > noScopeDistance;
+                float speedRatio = agent.velocity.magnitude / Mathf.Max(baseSpeed, 0.01f);
+                weapon.ExternalMoveInaccuracy = Mathf.Clamp01(Mathf.InverseLerp(0.25f, 0.8f, speedRatio));
                 weapon.TryFire();
             }
         }

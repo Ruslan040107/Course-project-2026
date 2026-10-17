@@ -7,6 +7,7 @@ public class PlayerShoot : MonoBehaviour
     public GameObject crosshair;   // if empty, taken from the Spectator component
 
     Health health;
+    PlayerController pcRef;
     Camera cam;
     float baseFov = 90f;
     float currentFov = 90f;
@@ -76,8 +77,8 @@ public class PlayerShoot : MonoBehaviour
             if (sp != null) crosshair = sp.crosshair;
         }
 
-        PlayerController pc = GetComponent<PlayerController>();
-        if (pc != null && pc.cameraTransform != null) cam = pc.cameraTransform.GetComponent<Camera>();
+        pcRef = GetComponent<PlayerController>();
+        if (pcRef != null && pcRef.cameraTransform != null) cam = pcRef.cameraTransform.GetComponent<Camera>();
 
         if (cam != null)
         {
@@ -162,9 +163,30 @@ public class PlayerShoot : MonoBehaviour
         GUI.color = Color.black;
         GUI.DrawTexture(new Rect(0f, 0f, x, Screen.height), Texture2D.whiteTexture);
         GUI.DrawTexture(new Rect(x + size, 0f, x, Screen.height), Texture2D.whiteTexture);
-        GUI.DrawTexture(new Rect(cx - half, cy - line * 0.5f, half * 2f, line), Texture2D.whiteTexture);
-        GUI.DrawTexture(new Rect(cx - line * 0.5f, cy - half, line, half * 2f), Texture2D.whiteTexture);
+
+        // moving in the scope: the crosshair gets thicker, paler and smeared
+        float mi = Mathf.Clamp01(pcRef != null ? pcRef.MoveInaccuracy : 0f);
+        float k = size / 1080f;
+        float thick = line * (1f + 1.5f * mi);
+
+        DrawCross(cx, cy, half, thick, 1f - 0.5f * mi);
+
+        if (mi > 0.05f)
+        {
+            float dx = mi * 12f * k * Mathf.Sin(Time.time * 7f);
+            float dy = mi * 9f * k * Mathf.Cos(Time.time * 9f);
+            DrawCross(cx + dx, cy + dy, half, thick, 0.35f * mi);
+            DrawCross(cx - dx * 0.7f, cy - dy * 0.7f, half, thick, 0.25f * mi);
+        }
+
         GUI.color = Color.white;
+    }
+
+    void DrawCross(float cx, float cy, float half, float thick, float alpha)
+    {
+        GUI.color = new Color(0f, 0f, 0f, alpha);
+        GUI.DrawTexture(new Rect(cx - half, cy - thick * 0.5f, half * 2f, thick), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(cx - thick * 0.5f, cy - half, thick, half * 2f), Texture2D.whiteTexture);
     }
 
     // black mask with a clear circle in the middle (about 82% of the screen height)

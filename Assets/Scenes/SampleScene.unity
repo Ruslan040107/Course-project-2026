@@ -1522,7 +1522,8 @@ MonoBehaviour:
   decalPool: 80
   decalLifetime: 25
   decalFadeTime: 4
-  headshotIcon: {fileID: 0}
+  headshotIcon: {fileID: 2800000, guid: ad78b139607381b47b5cf075577f75ee, type: 3}
+  noScopeIcon: {fileID: 2800000, guid: 390325ec540e2034aab11efb04c87978, type: 3}
   maxEffectDistance: 80
 --- !u!4 &849740353
 Transform:
@@ -2576,14 +2577,14 @@ MonoBehaviour:
   speedPenalty: 0.1
   radiusFactor: 0.7
   revealTime: 1
-  weaponTeam0: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
+  weaponTeam0: {fileID: 11400000, guid: c83cde50ed5a16841ab86f3580684d2f, type: 2}
   weaponTeam1: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
   soloMode: 0
   trainingTarget: {fileID: 1048157121}
-  botsPerTeam: 1
+  botsPerTeam: 5
   roundTime: 60
   breakTime: 3
-  roundsToWin: 3
+  roundsToWin: 30
   simulation: 0
   simTimeScale: 10
   roundsToSimulate: 300
@@ -2849,14 +2850,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1913474535}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -9.94, y: 1, z: -11.81}
+  m_LocalRotation: {x: -0, y: -0.6905157, z: -0, w: 0.7233175}
+  m_LocalPosition: {x: 19.31, y: 1, z: -20.44}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 330585546}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: -87.342, z: 0}
 --- !u!114 &1913474540
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -47,4 +47,5 @@ public class WeaponData : ScriptableObject
     [Tooltip("spread multiplier when not scoped")] public float unscopedSpreadMultiplier = 1f;
     [Tooltip("minimum spread in degrees when not scoped, so a no-scope shot is never perfectly accurate")] public float unscopedMinSpread = 1.2f;
     [Tooltip("speed multiplier while scoped")] public float scopedMoveFactor = 0.5f;
+    [Tooltip("spread in degrees while scoped and running at full speed, smaller when walking slowly")] public float scopedMoveSpread = 3f;
 }

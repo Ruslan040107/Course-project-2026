@@ -54,6 +54,9 @@ public class Weapon : MonoBehaviour
     public float moveSpeedFactor = 1f;
     public float recoilFactor = 1f;
 
+    // 0..1, how much the shooter moves; the player gets it from PlayerController, bots set it from BotController
+    public float ExternalMoveInaccuracy { get; set; }
+
     public bool IsMelee => data != null && data.melee;
 
     // set by PlayerShoot; bots are always treated as scoped
@@ -168,6 +171,14 @@ public class Weapon : MonoBehaviour
 
         float spreadNow = spreadAngle * mult;
         if (noScope) spreadNow = Mathf.Max(spreadNow, data.unscopedMinSpread);
+
+        // scoped sniper while moving: the scope does not help, the shot goes wide
+        bool scopedSniper = data != null && data.scopeFov != null && data.scopeFov.Length > 0 && Scoped;
+        if (scopedSniper)
+        {
+            float mi = movement != null ? movement.MoveInaccuracy : ExternalMoveInaccuracy;
+            spreadNow = Mathf.Max(spreadNow, data.scopedMoveSpread * mi);
+        }
         Quaternion spread = Quaternion.Euler(
             Random.Range(-spreadNow, spreadNow),
             Random.Range(-spreadNow, spreadNow),
@@ -206,7 +217,7 @@ public class Weapon : MonoBehaviour
                     multiplier = legMultiplier;
                 }
 
-                target.TakeDamage(damage * multiplier, owner, head);
+                target.TakeDamage(damage * multiplier, owner, head, noScope);
             }
 
             shot.end = hit.point;

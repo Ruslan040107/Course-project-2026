@@ -17,6 +17,7 @@ public class CombatEffects : MonoBehaviour
 
     [Header("Other")]
     public Texture2D headshotIcon;
+    public Texture2D noScopeIcon;
     public float maxEffectDistance = 80f;
 
     class Tracer
@@ -37,6 +38,7 @@ public class CombatEffects : MonoBehaviour
     class FeedEntry
     {
         public bool headshot;
+        public bool noScope;
         public string killer, victim;
         public int killerTeam, victimTeam;
         public float expire;
@@ -56,6 +58,7 @@ public class CombatEffects : MonoBehaviour
     Color hitMarkerColor = Color.white;
     GUIStyle feedStyle;
     Texture2D headIcon;
+    Texture2D noScopeTex;
 
     void Awake()
     {
@@ -85,6 +88,7 @@ public class CombatEffects : MonoBehaviour
         holeSprite = MakeSprite(MakeHole(64));
         bloodSprite = MakeSprite(MakeSplat(64));
         headIcon = headshotIcon != null ? headshotIcon : MakeHeadIcon(32);
+        noScopeTex = noScopeIcon != null ? noScopeIcon : MakeNoScopeIcon(32);
 
         flashFx = MakeParticles("Flash", softMat, new Color(1f, 0.9f, 0.6f, 1f), 0.35f, 0.05f, 0f, 0.1f, 0f, 5f);
         sparkFx = MakeParticles("Sparks", softMat, new Color(1f, 0.85f, 0.45f, 1f), 0.04f, 0.4f, 2f, 5f, 1.2f, 35f);
@@ -243,7 +247,7 @@ public class CombatEffects : MonoBehaviour
         }
     }
 
-    void OnKilled(Health victim, Health killer, bool headshot)
+    void OnKilled(Health victim, Health killer, bool headshot, bool noScope)
     {
         Burst(bloodFx, victim.transform.position + Vector3.up * 0.4f, Vector3.up, headshot ? 55 : 40);
         SpawnFloorBlood(victim.transform.position, 1.1f);
@@ -255,6 +259,7 @@ public class CombatEffects : MonoBehaviour
             victim = victim.name,
             victimTeam = victim.team,
             headshot = headshot,
+            noScope = noScope,
             expire = Time.time + 6f
         });
         if (feed.Count > 5) feed.RemoveAt(0);
@@ -375,6 +380,36 @@ public class CombatEffects : MonoBehaviour
         feed.Clear();
     }
 
+    // crossed-out scope: a ring with a crosshair and a red strike
+    static Texture2D MakeNoScopeIcon(int size)
+    {
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 c = new Vector2(size * 0.5f, size * 0.5f);
+
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                Vector2 p = new Vector2(x + 0.5f, y + 0.5f);
+                float d = Vector2.Distance(p, c);
+                Color col = Color.clear;
+
+                bool ring = d < size * 0.42f && d > size * 0.32f;
+                bool cross = d < size * 0.42f && (Mathf.Abs(p.x - c.x) < size * 0.05f || Mathf.Abs(p.y - c.y) < size * 0.05f);
+                if (ring || cross) col = Color.white;
+
+                // diagonal strike from the top left to the bottom right
+                bool strike = Mathf.Abs(p.x - (size - p.y)) < size * 0.07f && p.x > size * 0.06f && p.x < size * 0.94f;
+                if (strike) col = new Color(0.95f, 0.15f, 0.15f, 1f);
+
+                tex.SetPixel(x, y, col);
+            }
+
+        tex.Apply();
+        return tex;
+    }
+
     static Texture2D MakeHeadIcon(int size)
     {
         Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
@@ -445,7 +480,7 @@ public class CombatEffects : MonoBehaviour
             Vector2 sa = feedStyle.CalcSize(a);
             Vector2 sm = feedStyle.CalcSize(m);
             Vector2 sb = feedStyle.CalcSize(b);
-            float iconW = e.headshot ? icon + 6f : 0f;
+            float iconW = (e.noScope ? icon + 6f : 0f) + (e.headshot ? icon + 6f : 0f);
             float x = Screen.width - 20f - (sa.x + sm.x + iconW + sb.x);
 
             GUI.contentColor = TeamColor(e.killerTeam);
@@ -453,8 +488,16 @@ public class CombatEffects : MonoBehaviour
             GUI.contentColor = Color.white;
             GUI.Label(new Rect(x + sa.x, y, sm.x, sm.y), m, feedStyle);
 
+            float ix = x + sa.x + sm.x;
+
+            if (e.noScope && noScopeTex != null)
+            {
+                GUI.DrawTexture(new Rect(ix, y + (sa.y - icon) * 0.5f, icon, icon), noScopeTex);
+                ix += icon + 6f;
+            }
+
             if (e.headshot && headIcon != null)
-                GUI.DrawTexture(new Rect(x + sa.x + sm.x, y + (sa.y - icon) * 0.5f, icon, icon), headIcon);
+                GUI.DrawTexture(new Rect(ix, y + (sa.y - icon) * 0.5f, icon, icon), headIcon);
 
             GUI.contentColor = TeamColor(e.victimTeam);
             GUI.Label(new Rect(x + sa.x + sm.x + iconW, y, sb.x, sb.y), b, feedStyle);

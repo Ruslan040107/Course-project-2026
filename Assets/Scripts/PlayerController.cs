@@ -60,7 +60,11 @@ public class PlayerController : MonoBehaviour
     float kickYaw;
     float kickRoll;
     float lastShotTime = -10f;
+    float moveInaccuracy;
     int sprayIndex;
+
+    // 0 = standing or creeping, 1 = running, above 1 = in the air
+    public float MoveInaccuracy => moveInaccuracy;
 
     public bool IsCrouching => StandFactor < 0.5f;
     public bool IsSneaking { get; private set; }
@@ -129,6 +133,7 @@ public class PlayerController : MonoBehaviour
         UpdateCrouch();
         Look();
         Move();
+        UpdateMoveInaccuracy();
         UpdateSpread();
     }
 
@@ -165,6 +170,16 @@ public class PlayerController : MonoBehaviour
         }
 
         return f;
+    }
+
+    void UpdateMoveInaccuracy()
+    {
+        Vector3 v = controller.velocity;
+        v.y = 0f;
+        float ratio = v.magnitude / Mathf.Max(moveSpeed, 0.01f);
+
+        float target = controller.isGrounded ? Mathf.Clamp01(Mathf.InverseLerp(0.25f, 0.8f, ratio)) : 1.5f;
+        moveInaccuracy = Mathf.MoveTowards(moveInaccuracy, target, 8f * Time.deltaTime);
     }
 
     void UpdateSpread()

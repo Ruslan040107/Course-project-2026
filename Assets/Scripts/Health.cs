@@ -4,7 +4,8 @@ using UnityEngine;
 public class Health : MonoBehaviour
 {
     public static readonly List<Health> All = new List<Health>();
-    public static event System.Action<Health, Health, bool> AnyKilled;
+    // victim, killer, headshot, noscope
+    public static event System.Action<Health, Health, bool, bool> AnyKilled;
 
     public int team;
     public float maxHealth = 100f;
@@ -20,6 +21,7 @@ public class Health : MonoBehaviour
     float pendingDamage;
     Health pendingAttacker;
     bool pendingHeadshot;
+    bool pendingNoScope;
     GUIStyle style;
 
     public bool IsDead => current <= 0f;
@@ -54,13 +56,14 @@ public class Health : MonoBehaviour
         All.Remove(this);
     }
 
-    public void TakeDamage(float amount, Health attacker = null, bool headshot = false)
+    public void TakeDamage(float amount, Health attacker = null, bool headshot = false, bool noScope = false)
     {
         if (IsDead) return;
         if (attacker != null) Damaged?.Invoke(attacker);
         pendingDamage += amount;
         if (attacker != null) pendingAttacker = attacker;
         pendingHeadshot = headshot;
+        pendingNoScope = noScope;
     }
 
     public void ApplyPending()
@@ -74,6 +77,7 @@ public class Health : MonoBehaviour
             pendingDamage = 0f;
             pendingAttacker = null;
             pendingHeadshot = false;
+            pendingNoScope = false;
             return;
         }
 
@@ -91,6 +95,7 @@ public class Health : MonoBehaviour
         pendingDamage = 0f;
         pendingAttacker = null;
         pendingHeadshot = false;
+        pendingNoScope = false;
         SetBodyVisible(true);
         gameObject.SetActive(true);
     }
@@ -98,9 +103,10 @@ public class Health : MonoBehaviour
     void OnDeath()
     {
         Debug.Log(name + " died");
-        AnyKilled?.Invoke(this, pendingAttacker, pendingHeadshot);
+        AnyKilled?.Invoke(this, pendingAttacker, pendingHeadshot, pendingNoScope);
         pendingAttacker = null;
         pendingHeadshot = false;
+        pendingNoScope = false;
 
         if (deactivateOnDeath) gameObject.SetActive(false);
         else SetBodyVisible(false);
