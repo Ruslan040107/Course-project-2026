@@ -39,7 +39,7 @@ public class PlayerHud : MonoBehaviour
         GUI.Label(new Rect(x, y, w, 36f), weapon.weaponName, small);
         if (weapon.IsMelee) return;
 
-        GUI.Label(new Rect(x, y + 28f, w, 56f), weapon.Ammo + " / " + weapon.Reserve, big);
+        GUI.Label(new Rect(x, y + 28f, w, 56f), Weapon.InfiniteAmmo ? "INF" : weapon.Ammo + " / " + weapon.Reserve, big);
 
         if (weapon.IsReloading)
         {

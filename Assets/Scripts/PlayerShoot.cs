@@ -4,6 +4,7 @@ public class PlayerShoot : MonoBehaviour
 {
     public Weapon weapon;
     public float zoomSpeed = 14f;
+    public GameObject crosshair;   // if empty, taken from the Spectator component
 
     Health health;
     Camera cam;
@@ -69,6 +70,12 @@ public class PlayerShoot : MonoBehaviour
     {
         health = GetComponent<Health>();
 
+        if (crosshair == null)
+        {
+            Spectator sp = GetComponent<Spectator>();
+            if (sp != null) crosshair = sp.crosshair;
+        }
+
         PlayerController pc = GetComponent<PlayerController>();
         if (pc != null && pc.cameraTransform != null) cam = pc.cameraTransform.GetComponent<Camera>();
 
@@ -85,6 +92,9 @@ public class PlayerShoot : MonoBehaviour
 
         bool dead = health != null && health.IsDead;
         int levels = ScopeLevels();
+
+        // sniper rifles have no crosshair, only the scope
+        if (!dead && crosshair != null) crosshair.SetActive(levels == 0);
 
         if (weapon.data != lastData)
         {

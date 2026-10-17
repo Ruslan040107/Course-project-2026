@@ -10,6 +10,7 @@ public class PlayerLoadout : MonoBehaviour
     PlayerShoot shoot;
     int[] ammo;
     int[] reserve;
+    float[] readyAt;
     int current;
     bool initialized;
     GUIStyle style;
@@ -36,6 +37,7 @@ public class PlayerLoadout : MonoBehaviour
 
         ammo = new int[slots.Length];
         reserve = new int[slots.Length];
+        readyAt = new float[slots.Length];
 
         for (int i = 0; i < slots.Length; i++)
         {
@@ -77,10 +79,11 @@ public class PlayerLoadout : MonoBehaviour
 
         ammo[current] = weapon.Ammo;
         reserve[current] = weapon.Reserve;
+        readyAt[current] = weapon.NextShotTime;
 
         current = index;
         if (shoot != null) shoot.ResetZoom();
-        weapon.Equip(slots[index], ammo[index], reserve[index]);
+        weapon.Equip(slots[index], ammo[index], reserve[index], readyAt[index]);
     }
 
     void OnGUI()

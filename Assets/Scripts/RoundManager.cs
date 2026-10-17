@@ -25,6 +25,10 @@ public class RoundManager : MonoBehaviour
     public WeaponData weaponTeam0;
     public WeaponData weaponTeam1;
 
+    [Header("Solo test mode")]
+    [Tooltip("you alone: no bots, no timer, infinite ammo, a training target")] public bool soloMode;
+    public GameObject trainingTarget;
+
     [Header("Rules")]
     public int botsPerTeam = 5;
     public float roundTime = 60f;
@@ -39,6 +43,8 @@ public class RoundManager : MonoBehaviour
 
     public int[] score = new int[2];
 
+    bool Solo => soloMode && !simulation;
+
     float timer;
     bool inBreak;
     bool matchOver;
@@ -50,6 +56,14 @@ public class RoundManager : MonoBehaviour
     void Start()
     {
         if (overviewCamera != null) overviewCamera.gameObject.SetActive(simulation);
+
+        Weapon.InfiniteAmmo = Solo;
+        if (trainingTarget != null)
+        {
+            Health th = trainingTarget.GetComponent<Health>();
+            if (!Solo && th != null) th.Unregister();
+            trainingTarget.SetActive(Solo);
+        }
 
         if (simulation)
         {
@@ -95,10 +109,22 @@ public class RoundManager : MonoBehaviour
     void OnDestroy()
     {
         Time.timeScale = 1f;
+        Weapon.InfiniteAmmo = false;
     }
 
     void Update()
     {
+        if (Solo)
+        {
+            // no rounds in solo mode, only respawn if the player dies (for example falls out of the map)
+            if (player != null && player.IsDead)
+            {
+                Spawn(0, spawnRoot0);
+                RoundStarted?.Invoke();
+            }
+            return;
+        }
+
         if (matchOver)
         {
             if (!simulation && Input.GetKeyDown(KeyCode.R)) ResetMatch();
@@ -120,6 +146,8 @@ public class RoundManager : MonoBehaviour
 
     void SpawnBots()
     {
+        if (Solo) return;
+
         for (int team = 0; team < 2; team++)
         {
             int count = botsPerTeam;
@@ -150,7 +178,7 @@ public class RoundManager : MonoBehaviour
     void StartRound()
     {
         Spawn(0, spawnRoot0);
-        Spawn(1, spawnRoot1);
+        if (!Solo) Spawn(1, spawnRoot1);
         RoundStarted?.Invoke();
         timer = roundTime;
         inBreak = false;
@@ -298,6 +326,14 @@ public class RoundManager : MonoBehaviour
         }
 
         float cx = Screen.width / 2f;
+
+        if (Solo)
+        {
+            GUI.contentColor = Color.white;
+            style.alignment = TextAnchor.UpperCenter;
+            GUI.Label(new Rect(cx - 300, 10, 600, 50), "SOLO TEST", style);
+            return;
+        }
         string center = simulation
             ? roundsPlayed + "/" + roundsToSimulate
             : Mathf.CeilToInt(Mathf.Max(timer, 0f)) + " s";

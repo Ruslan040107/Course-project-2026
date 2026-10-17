@@ -45,5 +45,6 @@ public class WeaponData : ScriptableObject
     [Header("Scope (leave empty if no scope)")]
     [Tooltip("camera FOV for each zoom level, e.g. 40 and 10")] public float[] scopeFov;
     [Tooltip("spread multiplier when not scoped")] public float unscopedSpreadMultiplier = 1f;
+    [Tooltip("minimum spread in degrees when not scoped, so a no-scope shot is never perfectly accurate")] public float unscopedMinSpread = 1.2f;
     [Tooltip("speed multiplier while scoped")] public float scopedMoveFactor = 0.5f;
 }

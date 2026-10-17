@@ -12,6 +12,10 @@ public class Health : MonoBehaviour
     public bool deactivateOnDeath = true;
     public bool showHud;
     public event System.Action<Health> Damaged;
+    // amount, attacker, headshot; fired when the damage is applied
+    public event System.Action<float, Health, bool> DamageTaken;
+    // training target: takes damage (and reports it) but never dies
+    public bool invulnerable;
 
     float pendingDamage;
     Health pendingAttacker;
@@ -63,6 +67,16 @@ public class Health : MonoBehaviour
     {
         if (pendingDamage <= 0f) return;
 
+        DamageTaken?.Invoke(pendingDamage, pendingAttacker, pendingHeadshot);
+
+        if (invulnerable)
+        {
+            pendingDamage = 0f;
+            pendingAttacker = null;
+            pendingHeadshot = false;
+            return;
+        }
+
         if (!IsDead)
         {
             current -= pendingDamage;
@@ -88,7 +102,6 @@ public class Health : MonoBehaviour
         pendingAttacker = null;
         pendingHeadshot = false;
 
-        if (deactivateOnDeath) gameObject.SetActive(false);
         if (deactivateOnDeath) gameObject.SetActive(false);
         else SetBodyVisible(false);
     }

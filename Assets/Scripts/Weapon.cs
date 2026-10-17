@@ -19,6 +19,9 @@ public class Weapon : MonoBehaviour
     public static event System.Action<ShotInfo> AnyShot;
     public event System.Action ReloadStarted;
 
+    // solo test mode: the magazine never runs out
+    public static bool InfiniteAmmo;
+
     PlayerController movement;
 
     [Header("Data (optional, overrides the values below)")]
@@ -66,6 +69,7 @@ public class Weapon : MonoBehaviour
     public int Ammo { get { FinishReload(); return ammo; } }
     public int Reserve { get { FinishReload(); return reserve; } }
     public bool IsReloading { get { FinishReload(); return reloading; } }
+    public float NextShotTime => nextShotTime;
     public float ReloadProgress => reloading ? Mathf.Clamp01(1f - (reloadEnd - Time.time) / reloadTime) : 1f;
 
     void Awake()
@@ -94,7 +98,7 @@ public class Weapon : MonoBehaviour
     }
 
     // ammoNow / reserveNow below 0 means a full magazine and full reserve
-    public void Equip(WeaponData newData, int ammoNow = -1, int reserveNow = -1)
+    public void Equip(WeaponData newData, int ammoNow = -1, int reserveNow = -1, float readyAt = 0f)
     {
         data = newData;
         if (data != null) CopyData();
@@ -103,7 +107,9 @@ public class Weapon : MonoBehaviour
         if (ammoNow >= 0) ammo = Mathf.Min(ammoNow, magazineSize);
         if (reserveNow >= 0) reserve = reserveNow;
 
-        if (data != null) nextShotTime = Time.time + data.drawTime;
+        // the weapon is ready after its draw time, but never before its own shot cooldown has passed
+        float drawEnd = Time.time + (data != null ? data.drawTime : 0f);
+        nextShotTime = Mathf.Max(readyAt, drawEnd);
     }
 
     public void ResetAmmo()
@@ -127,6 +133,7 @@ public class Weapon : MonoBehaviour
     public void StartReload()
     {
         FinishReload();
+        if (InfiniteAmmo) return;
         if (reloading || ammo >= magazineSize || reserve <= 0) return;
 
         reloading = true;
@@ -150,15 +157,17 @@ public class Weapon : MonoBehaviour
         if (Time.time < nextShotTime) return false;
         nextShotTime = Time.time + 1f / fireRate;
         ammo--;
+        if (InfiniteAmmo) ammo = magazineSize;
 
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
 
         float mult = movement != null ? movement.SpreadMultiplier : botSpreadMultiplier;
-        if (data != null && data.scopeFov != null && data.scopeFov.Length > 0 && !Scoped)
-            mult *= data.unscopedSpreadMultiplier;
+        bool noScope = data != null && data.scopeFov != null && data.scopeFov.Length > 0 && !Scoped;
+        if (noScope) mult *= data.unscopedSpreadMultiplier;
 
         float spreadNow = spreadAngle * mult;
+        if (noScope) spreadNow = Mathf.Max(spreadNow, data.unscopedMinSpread);
         Quaternion spread = Quaternion.Euler(
             Random.Range(-spreadNow, spreadNow),
             Random.Range(-spreadNow, spreadNow),
