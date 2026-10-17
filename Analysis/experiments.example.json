@@ -1,0 +1,17 @@
+{
+  "defaults": { "radius": 0.7, "penalty": 0.1, "reveal": 1.0 },
+  "experiments": [
+    { "name": "baseline_v2",        "rounds": 1000, "params": {} },
+
+    { "name": "stealth2_r0.6",      "rounds": 1000, "swap": true, "params": { "stealth0": 2, "radius": 0.6 } },
+    { "name": "stealth2_r0.5",      "rounds": 1000, "swap": true, "params": { "stealth0": 2, "radius": 0.5 } },
+    { "name": "stealth3_r0.5",      "rounds": 1000, "swap": true, "params": { "stealth0": 3, "radius": 0.5 } },
+    { "name": "stealth3_r0.5_p0.2", "rounds": 1000, "swap": true, "params": { "stealth0": 3, "radius": 0.5, "penalty": 0.2 } },
+
+    { "name": "ak_vs_m4",           "rounds": 1000, "swap": true, "params": { "weapon0": "AK-47", "weapon1": "M4A4" } },
+    { "name": "awp_vs_ak",          "rounds": 1000, "swap": true, "params": { "weapon0": "AWP",   "weapon1": "AK-47" } },
+
+    { "name": "bhop1_vs_0",         "rounds": 1000, "swap": true, "params": { "bhop0": 1 } },
+    { "name": "bhop3_vs_0",         "rounds": 1000, "swap": true, "params": { "bhop0": 3 } }
+  ]
+}
