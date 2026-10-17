@@ -6,6 +6,8 @@ public class Health : MonoBehaviour
     public static readonly List<Health> All = new List<Health>();
     // victim, killer, headshot, noscope
     public static event System.Action<Health, Health, bool, bool> AnyKilled;
+    // victim, attacker, damage (not more than the victim had left), headshot
+    public static event System.Action<Health, Health, float, bool> AnyDamaged;
 
     public int team;
     public float maxHealth = 100f;
@@ -83,6 +85,7 @@ public class Health : MonoBehaviour
 
         if (!IsDead)
         {
+            AnyDamaged?.Invoke(this, pendingAttacker, Mathf.Min(pendingDamage, current), pendingHeadshot);
             current -= pendingDamage;
             if (IsDead) OnDeath();
         }

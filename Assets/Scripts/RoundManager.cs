@@ -58,6 +58,8 @@ public class RoundManager : MonoBehaviour
         if (overviewCamera != null) overviewCamera.gameObject.SetActive(simulation);
 
         Weapon.InfiniteAmmo = Solo;
+
+        if (!simulation && FindFirstObjectByType<Scoreboard>() == null) gameObject.AddComponent<Scoreboard>();
         if (trainingTarget != null)
         {
             Health th = trainingTarget.GetComponent<Health>();

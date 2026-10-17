@@ -35,8 +35,10 @@ public class Weapon : MonoBehaviour
     public float damage = 25f;
     public float headMultiplier = 3f;
     public float legMultiplier = 0.75f;
-    [Range(0f, 1f)] public float headZone = 0.82f;
-    [Range(0f, 1f)] public float legZone = 0.38f;
+    [Tooltip("used when the hit collider has no HitZone: the head is the part of the collider above this height (0..1)")]
+    [Range(0f, 1f)] public float headZoneStart = 0.72f;
+    [Tooltip("the legs are the part of the collider below this height (0..1)")]
+    [Range(0f, 1f)] public float legZoneEnd = 0.35f;
 
     [Header("Fire")]
     public float fireRate = 8f;
@@ -204,17 +206,36 @@ public class Weapon : MonoBehaviour
             {
                 float multiplier = 1f;
 
-                Bounds b = hit.collider.bounds;
-                float t = Mathf.InverseLerp(b.min.y, b.max.y, hit.point.y);
+                HitZone hitZone = hit.collider.GetComponent<HitZone>();
 
-                if (t >= headZone)
+                if (hitZone != null)
                 {
-                    multiplier = headMultiplier;
-                    head = true;
+                    // character model with separate head, body and leg colliders
+                    if (hitZone.zone == BodyZone.Head)
+                    {
+                        multiplier = headMultiplier;
+                        head = true;
+                    }
+                    else if (hitZone.zone == BodyZone.Legs)
+                    {
+                        multiplier = legMultiplier;
+                    }
                 }
-                else if (t <= legZone)
+                else
                 {
-                    multiplier = legMultiplier;
+                    // one collider: decide by the height of the hit
+                    Bounds b = hit.collider.bounds;
+                    float t = Mathf.InverseLerp(b.min.y, b.max.y, hit.point.y);
+
+                    if (t >= headZoneStart)
+                    {
+                        multiplier = headMultiplier;
+                        head = true;
+                    }
+                    else if (t <= legZoneEnd)
+                    {
+                        multiplier = legMultiplier;
+                    }
                 }
 
                 target.TakeDamage(damage * multiplier, owner, head, noScope);
