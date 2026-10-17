@@ -11,7 +11,6 @@ public static class WeaponAssetsCreator
     {
         Directory.CreateDirectory(Folder);
 
-        // name, category, price, reward, damage, rate, auto, spread, recoil, mag, reserve, reload, move, draw
         Make("Glock-18", WeaponCategory.Pistol, 200, 300, 30f, 6.7f, false, 1.0f, 0.5f, 20, 120, 2.3f, 0.96f, 0.5f);
         Make("USP-S", WeaponCategory.Pistol, 200, 300, 35f, 5.9f, false, 0.6f, 0.6f, 12, 24, 2.2f, 0.96f, 0.5f);
         Make("Desert Eagle", WeaponCategory.Pistol, 700, 300, 63f, 4.5f, false, 0.8f, 2.0f, 7, 35, 2.2f, 0.92f, 0.6f);
