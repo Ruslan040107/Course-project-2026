@@ -1,5 +1,7 @@
 # 🎯 Unity Shooter — Course Project
 
+ПОКА ЧТО ЭТО НЕ ПОЛНОЕ README, ПЛАНИРУЮ ДОПОЛНЯТЬ ЕГО :)
+
 A course project for the **2nd year** of the **Bachelor's Programme in Applied Mathematics and Informatics (AMI)** at the **Faculty of Computer Science, HSE University**.
 
 The goal of this project is to build a small shooter game in **Unity** featuring autonomous bots, a symmetric arena, and a rigorous calibration procedure to verify the fairness of the simulation.
