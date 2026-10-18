@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.SceneManagement;
 using System.Collections;
 
 public class RoundManager : MonoBehaviour
@@ -58,8 +59,19 @@ public class RoundManager : MonoBehaviour
     string csvPath;
     GUIStyle style;
 
+    static bool mapLoaded;
+
     void Start()
     {
+        // -map <scene name>: play (or simulate) on another map; the scene must be in the build list
+        string map = Arg("-map");
+        if (map != null && !mapLoaded && map != SceneManager.GetActiveScene().name)
+        {
+            mapLoaded = true;
+            SceneManager.LoadScene(map);
+            return;
+        }
+
         ApplyCommandLine();
 
         if (overviewCamera != null) overviewCamera.gameObject.SetActive(simulation);
@@ -108,7 +120,7 @@ public class RoundManager : MonoBehaviour
             {
                 csvPath = Path.Combine(dir, "sim_" + stamp + ".csv");
             }
-            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1,bhop0,bhop1\n");
+            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1,bhop0,bhop1,map\n");
             Debug.Log("Simulation results: " + csvPath);
         }
 
@@ -390,12 +402,12 @@ public class RoundManager : MonoBehaviour
     void LogRound(int winner, int alive0, int alive1, float duration)
     {
         string line = string.Format(CultureInfo.InvariantCulture,
-            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2},{12},{13},{14},{15}\n",
+            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2},{12},{13},{14},{15},{16}\n",
             roundsPlayed, winner, alive0, alive1, Size(0), Size(1),
             stealthLevel0, stealthLevel1, speedPenalty, radiusFactor, revealTime, duration,
             weaponTeam0 != null ? weaponTeam0.weaponName : "default",
             weaponTeam1 != null ? weaponTeam1.weaponName : "default",
-            bhopLevel0, bhopLevel1);
+            bhopLevel0, bhopLevel1, SceneManager.GetActiveScene().name);
         File.AppendAllText(csvPath, line);
     }
 

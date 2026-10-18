@@ -38,6 +38,7 @@ public class ViewModel : MonoBehaviour
         public GameObject root;
         public Transform muzzle, eject, mag, slide;
         public Vector3 magRest, slideRest;
+        public Vector3 magDrop = new Vector3(0f, -0.3f, 0.02f);   // where the magazine goes on reload, in its parent's space
         public Quaternion slideRestRot = Quaternion.identity;
         public float slideTravel;
         public bool boltAction;
@@ -248,7 +249,7 @@ public class ViewModel : MonoBehaviour
 
         if (current.mag != null)
         {
-            current.mag.localPosition = current.magRest + new Vector3(0f, -0.3f, 0.02f) * drop;
+            current.mag.localPosition = current.magRest + current.magDrop * drop;
             bool magVisible = drop < 0.95f;
             if (current.mag.gameObject.activeSelf != magVisible) current.mag.gameObject.SetActive(magVisible);
         }
@@ -388,7 +389,8 @@ public class ViewModel : MonoBehaviour
 
         string n = d.weaponName.ToLowerInvariant();
 
-        if (d.viewModelPrefab != null) UsePrefab(m, r, d);
+        GameObject prefab = ModelFor(d);
+        if (prefab != null) UsePrefab(m, r, d, prefab);
         else if (d.melee) BuildKnife(m, r);
         else if (d.category == WeaponCategory.Sniper || n.Contains("awp")) BuildAwp(m, r);
         else if (n.Contains("ak")) BuildAk(m, r);
@@ -397,7 +399,12 @@ public class ViewModel : MonoBehaviour
         else BuildPistol(m, r, n);
 
         if (m.muzzle == null) m.muzzle = Point(r, "Muzzle", new Vector3(0f, 0f, 0.3f));
-        if (m.mag != null) m.magRest = m.mag.localPosition;
+        if (m.mag != null)
+        {
+            m.magRest = m.mag.localPosition;
+            // the drop is "down" in the weapon's space, whatever the scale of an imported model is
+            m.magDrop = m.mag.parent.InverseTransformVector(r.TransformVector(new Vector3(0f, -0.3f, 0.02f)));
+        }
         if (m.slide != null)
         {
             m.slideRest = m.slide.localPosition;
@@ -409,35 +416,135 @@ public class ViewModel : MonoBehaviour
     // your own model (WeaponData.viewModelPrefab). Its children are found by name:
     // Muzzle (flash, tracers), Eject (shells), Mag (moves on reload), Slide or Bolt (moves on a shot),
     // Hands (if there is none, simple hands are added)
-    void UsePrefab(Model m, Transform r, WeaponData d)
+    // the model for a weapon: WeaponData.viewModelPrefab, or Resources/WeaponModels/<weapon name>
+    public static GameObject ModelFor(WeaponData d)
     {
-        GameObject go = Instantiate(d.viewModelPrefab, r, false);
-        go.name = d.viewModelPrefab.name;
+        if (d == null) return null;
+        if (d.viewModelPrefab != null) return d.viewModelPrefab;
+        return Resources.Load<GameObject>("WeaponModels/" + d.weaponName);
+    }
 
-        // colliders go at once, so they never block a shot from the camera
+    // Makes a copy of a weapon model under the parent, without colliders and shadows.
+    // If the model has the empty objects Grip, Up and Muzzle (made in Blender), it is turned
+    // so that the grip is at the parent's origin, the barrel looks along +Z and the top is +Y.
+    public static GameObject SpawnModel(GameObject prefab, Transform parent, bool shadows)
+    {
+        GameObject go = Instantiate(prefab, parent, false);
+        go.name = prefab.name;
+
+        // colliders go at once, so they never block a shot
         foreach (Collider c in go.GetComponentsInChildren<Collider>(true)) DestroyImmediate(c);
         foreach (Renderer rd in go.GetComponentsInChildren<Renderer>(true))
         {
-            rd.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            rd.receiveShadows = false;
+            rd.shadowCastingMode = shadows ? UnityEngine.Rendering.ShadowCastingMode.On : UnityEngine.Rendering.ShadowCastingMode.Off;
+            rd.receiveShadows = shadows;
+
+            Material[] mats = rd.sharedMaterials;
+            for (int i = 0; i < mats.Length; i++) mats[i] = Opaque(mats[i]);
+            rd.sharedMaterials = mats;
         }
 
-        m.muzzle = FindChild(go.transform, "Muzzle");
-        m.eject = FindChild(go.transform, "Eject");
-        m.mag = FindChild(go.transform, "Mag");
-        m.slide = FindChild(go.transform, "Slide");
-        if (m.slide == null) m.slide = FindChild(go.transform, "Bolt");
+        Transform t = go.transform;
+        Transform grip = FindChild(t, "Grip");
+        Transform up = FindChild(t, "Up");
+        Transform muzzle = FindChild(t, "Muzzle");
+        if (grip != null && up != null && muzzle != null)
+        {
+            Vector3 g = parent.InverseTransformPoint(grip.position);
+            Vector3 u = parent.InverseTransformPoint(up.position);
+            Vector3 f = parent.InverseTransformPoint(muzzle.position);
+            // the barrel is above the grip: only the part of grip->muzzle across the Up direction is "forward"
+            Vector3 upDir = (u - g).normalized;
+            Vector3 fwd = Vector3.ProjectOnPlane(f - g, upDir);
+            Quaternion q = Quaternion.LookRotation(fwd, upDir);
+            t.localRotation = Quaternion.Inverse(q) * t.localRotation;
+            t.localPosition -= parent.InverseTransformPoint(grip.position);
+        }
+        return go;
+    }
+
+    static readonly Dictionary<Material, Material> opaqueCopies = new Dictionary<Material, Material>();
+
+    // a model material imported as transparent (alpha 0 in the file) would be invisible: use an opaque copy
+    static Material Opaque(Material m)
+    {
+        if (m == null || !m.HasProperty("_Surface") || m.GetFloat("_Surface") < 0.5f) return m;
+        if (opaqueCopies.TryGetValue(m, out Material copy) && copy != null) return copy;
+
+        Shader lit = Shader.Find("Universal Render Pipeline/Lit");
+        copy = new Material(lit != null ? lit : m.shader) { name = m.name + " (opaque)" };
+        Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : m.color;
+        c.a = 1f;
+        copy.SetColor("_BaseColor", c);
+        if (m.HasProperty("_BaseMap")) copy.SetTexture("_BaseMap", m.GetTexture("_BaseMap"));
+        copy.SetFloat("_Smoothness", m.HasProperty("_Smoothness") ? Mathf.Min(m.GetFloat("_Smoothness"), 0.5f) : 0.3f);
+        opaqueCopies[m] = copy;
+        return copy;
+    }
+
+    void UsePrefab(Model m, Transform r, WeaponData d, GameObject prefab)
+    {
+        GameObject go = SpawnModel(prefab, r, false);
+        Transform t = go.transform;
+
+        m.muzzle = FindChild(t, "Muzzle");
+        m.eject = FindChild(t, "Eject");
+        m.mag = FindChild(t, "Mag");
+        m.slide = FindChild(t, "Slide");
+        if (m.slide == null) m.slide = FindChild(t, "Bolt");
         m.boltAction = d.category == WeaponCategory.Sniper;
         m.slideTravel = m.boltAction ? 0.07f : d.category == WeaponCategory.Pistol ? 0.035f : 0.05f;
 
-        if (FindChild(go.transform, "Hands") == null && !d.melee)
+        if (d.melee)
         {
-            if (d.category == WeaponCategory.Pistol) PistolHands(r);
-            else RifleHands(r, -0.04f, 0.3f);
+            // the blade points forward and up, like the knife made of shapes
+            Quaternion tilt = Quaternion.Euler(-35f, -10f, -25f);
+            t.localPosition = tilt * t.localPosition;
+            t.localRotation = tilt * t.localRotation;
         }
+        else if (m.muzzle != null)
+        {
+            // the barrel at the same height as on the models made of shapes
+            Vector3 mz = r.InverseTransformPoint(m.muzzle.position);
+            t.localPosition += new Vector3(0f, 0.03f - mz.y, 0f);
+        }
+
+        if (FindChild(t, "Hands") == null) ModelHands(m, r, d, FindChild(t, "Grip"));
     }
 
-    static Transform FindChild(Transform root, string name)
+    // simple gloves and sleeves for a model without hands
+    void ModelHands(Model m, Transform r, WeaponData d, Transform grip)
+    {
+        Material glove = Glove(), sleeve = Sleeve();
+        Vector3 g = grip != null ? r.InverseTransformPoint(grip.position) : Vector3.zero;
+
+        if (d.melee)
+        {
+            Box(r, g, new Vector3(0.055f, 0.06f, 0.09f), glove, new Vector3(-35f, -10f, -25f));
+            Box(r, g + new Vector3(0.03f, -0.1f, -0.17f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-30f, -8f, 0f));
+            return;
+        }
+
+        // right hand around the grip, the forearm goes back towards the camera
+        Box(r, g + new Vector3(0.004f, 0f, 0f), new Vector3(0.05f, 0.07f, 0.075f), glove, new Vector3(15f, 0f, 0f));
+        Box(r, g + new Vector3(0.03f, -0.07f, -0.17f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-25f, -8f, 0f));
+
+        if (d.category == WeaponCategory.Pistol)
+        {
+            // left hand holds the right one from below
+            Box(r, g + new Vector3(-0.03f, -0.01f, 0.005f), new Vector3(0.05f, 0.065f, 0.08f), glove, new Vector3(15f, 0f, -20f));
+            Box(r, g + new Vector3(-0.11f, -0.07f, -0.15f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-20f, 35f, 0f));
+            return;
+        }
+
+        // left hand under the handguard, half way to the muzzle
+        Vector3 mz = m.muzzle != null ? r.InverseTransformPoint(m.muzzle.position) : new Vector3(0f, 0.03f, 0.4f);
+        Vector3 fore = new Vector3(-0.005f, Mathf.Lerp(g.y, mz.y, 0.5f) - 0.035f, Mathf.Lerp(g.z, mz.z, 0.45f));
+        Box(r, fore, new Vector3(0.06f, 0.05f, 0.1f), glove);
+        Box(r, fore + new Vector3(-0.085f, -0.08f, -0.15f), new Vector3(0.075f, 0.075f, 0.32f), sleeve, new Vector3(-20f, 30f, 0f));
+    }
+
+    public static Transform FindChild(Transform root, string name)
     {
         foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
             if (string.Equals(t.name, name, System.StringComparison.OrdinalIgnoreCase)) return t;

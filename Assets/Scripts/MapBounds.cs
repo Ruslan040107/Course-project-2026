@@ -9,6 +9,10 @@ public class MapBounds : MonoBehaviour
     public float maxY = 30f;
     public float graceTime = 1.5f;
 
+    [Tooltip("bots wander inside +-this area; 0 = the bot's own arenaHalfSize (the arena map uses 0)")]
+    public float wanderHalfX;
+    public float wanderHalfZ;
+
     readonly Dictionary<Health, float> outside = new Dictionary<Health, float>();
 
     void FixedUpdate()

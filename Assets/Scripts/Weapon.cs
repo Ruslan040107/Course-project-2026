@@ -18,6 +18,9 @@ public class Weapon : MonoBehaviour
 {
     public static event System.Action<ShotInfo> AnyShot;
     public event System.Action ReloadStarted;
+    // for sounds: any weapon started a reload / was taken in hands
+    public static event System.Action<Weapon> AnyReloadStarted;
+    public static event System.Action<Weapon> AnyEquipped;
 
     // solo test mode: the magazine never runs out
     public static bool InfiniteAmmo;
@@ -64,6 +67,7 @@ public class Weapon : MonoBehaviour
     public float ExternalSpreadMultiplier { get; set; } = 1f;
 
     public bool IsMelee => data != null && data.melee;
+    public Health Owner => owner;
 
     // everything except automatic rifles reloads by itself when the magazine gets empty
     bool AutoReloads => !(data != null && data.category == WeaponCategory.Rifle && data.automatic);
@@ -122,6 +126,7 @@ public class Weapon : MonoBehaviour
         // the weapon is ready after its draw time, but never before its own shot cooldown has passed
         float drawEnd = Time.time + (data != null ? data.drawTime : 0f);
         nextShotTime = Mathf.Max(readyAt, drawEnd);
+        AnyEquipped?.Invoke(this);
     }
 
     public void ResetAmmo()
@@ -151,6 +156,7 @@ public class Weapon : MonoBehaviour
         reloading = true;
         reloadEnd = Time.time + reloadTime;
         ReloadStarted?.Invoke();
+        AnyReloadStarted?.Invoke(this);
     }
 
     public bool TryFire()

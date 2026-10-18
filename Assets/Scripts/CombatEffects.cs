@@ -146,6 +146,12 @@ public class CombatEffects : MonoBehaviour
 
         // killed players fall over instead of vanishing
         if (GetComponent<Corpses>() == null) gameObject.AddComponent<Corpses>();
+
+        // sounds, and bots hearing the player
+        if (GetComponent<GameAudio>() == null) gameObject.AddComponent<GameAudio>();
+
+        // weapon models in the bots' hands
+        if (GetComponent<BotWeaponModels>() == null) gameObject.AddComponent<BotWeaponModels>();
     }
 
     ParticleSystem MakeParticles(string name, Material mat, Color color, float size, float life,

@@ -37,6 +37,7 @@ public class BotController : MonoBehaviour
     float nextChainAt;
 
     NavMeshAgent agent;
+    MapBounds bounds;
     Health self;
     Stealth stealth;
     Health target;
@@ -53,6 +54,7 @@ public class BotController : MonoBehaviour
         agent.updateRotation = false;
         baseSpeed = agent.speed;
         baseOffset = agent.baseOffset;
+        bounds = FindAnyObjectByType<MapBounds>();
     }
 
     Vector3 AimPoint(Health t)
@@ -78,6 +80,30 @@ public class BotController : MonoBehaviour
     void OnDisable()
     {
         self.Damaged -= OnDamaged;
+    }
+
+    // a noise (the player's steps or shots, see GameAudio): bots of the other team within the radius hear it
+    public static void Noise(Vector3 position, float radius, Health source)
+    {
+        if (source == null) return;
+        float r2 = radius * radius;
+        foreach (Health h in Health.All)
+        {
+            if (h.IsDead || !h.gameObject.activeInHierarchy || h.team == source.team) continue;
+            if ((h.transform.position - position).sqrMagnitude > r2) continue;
+            BotController bot = h.GetComponent<BotController>();
+            if (bot != null) bot.Hear(position);
+        }
+    }
+
+    // the bot turns to the noise and goes to check it, unless it is already fighting
+    void Hear(Vector3 position)
+    {
+        if (!isActiveAndEnabled || target != null) return;
+        alertUntil = Time.time + alertTime;
+        lastKnown = position;
+        hasLastKnown = true;
+        lastSeenAt = Time.time;
     }
 
     void OnDamaged(Health attacker)
@@ -234,9 +260,12 @@ public class BotController : MonoBehaviour
         if (agent.pathPending) return;
         if (agent.hasPath && agent.remainingDistance > 1.5f) return;
 
+        // a bigger map tells the wander area through MapBounds, the arena keeps arenaHalfSize
+        float hx = bounds != null && bounds.wanderHalfX > 0f ? bounds.wanderHalfX : arenaHalfSize;
+        float hz = bounds != null && bounds.wanderHalfZ > 0f ? bounds.wanderHalfZ : arenaHalfSize;
         Vector3 point = new Vector3(
-            Random.Range(-arenaHalfSize, arenaHalfSize), 0f,
-            Random.Range(-arenaHalfSize, arenaHalfSize));
+            Random.Range(-hx, hx), 0f,
+            Random.Range(-hz, hz));
 
         if (NavMesh.SamplePosition(point, out NavMeshHit hit, 6f, NavMesh.AllAreas))
             agent.SetDestination(hit.position);

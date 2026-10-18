@@ -502,7 +502,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0.6, z: 0}
-  m_LocalScale: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1913474539}
@@ -2582,7 +2582,7 @@ MonoBehaviour:
   bhopLevel1: 1
   weaponTeam0: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
   weaponTeam1: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
-  soloMode: 1
+  soloMode: 0
   trainingTarget: {fileID: 1048157121}
   botsPerTeam: 5
   roundTime: 60
@@ -2625,6 +2625,8 @@ MonoBehaviour:
   minY: -3
   maxY: 30
   graceTime: 1.5
+  wanderHalfX: 0
+  wanderHalfZ: 0
 --- !u!1 &1890093896
 GameObject:
   m_ObjectHideFlags: 0

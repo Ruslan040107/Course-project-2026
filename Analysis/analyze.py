@@ -41,6 +41,8 @@ def report(df):
         print("penalty / radius / reveal:", df[["penalty", "radius", "reveal"]].iloc[0].tolist())
     if "weapon0" in df:
         print("weapons:", df["weapon0"].iloc[0], "vs", df["weapon1"].iloc[0])
+    if "map" in df:
+        print("map:", df["map"].iloc[0])
     if "bhop0" in df:
         print("bhop levels:", int(df["bhop0"].iloc[0]), "vs", int(df["bhop1"].iloc[0]))
 

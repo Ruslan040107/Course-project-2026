@@ -29,7 +29,7 @@ DATA = os.path.join(HERE, "data")
 PARTS = os.path.join(DATA, "_parts")
 
 # settings that are passed to the game as "-<key> <value>"
-PARAMS = ["bots", "roundtime", "timescale",
+PARAMS = ["map", "bots", "roundtime", "timescale",
           "stealth0", "stealth1", "penalty", "radius", "reveal",
           "weapon0", "weapon1", "bhop0", "bhop1"]
 
