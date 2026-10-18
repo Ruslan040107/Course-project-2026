@@ -48,6 +48,7 @@ public class PlayerController : MonoBehaviour
     CharacterController controller;
     Health health;
     PlayerShoot shoot;
+    Bhop bhop;
     Weapon weapon;
     float verticalVelocity;
     float pitch;
@@ -65,6 +66,8 @@ public class PlayerController : MonoBehaviour
 
     // 0 = standing or creeping, 1 = running, above 1 = in the air
     public float MoveInaccuracy => moveInaccuracy;
+
+    public bool IsGrounded => controller != null && controller.isGrounded;
 
     public bool IsCrouching => StandFactor < 0.5f;
     public bool IsSneaking { get; private set; }
@@ -225,13 +228,24 @@ public class PlayerController : MonoBehaviour
         if (move.magnitude > 1f) move.Normalize();
         moveAmount = move.magnitude;
 
-        float speed = moveSpeed * SpeedFactor();
+        if (bhop == null) bhop = GetComponent<Bhop>();
+        bool bhopOn = bhop != null && bhop.Enabled;
 
         if (controller.isGrounded && verticalVelocity < 0f)
             verticalVelocity = -2f;
 
-        if (controller.isGrounded && Input.GetButtonDown("Jump"))
+        // with the bhop upgrade holding Jump keeps hopping, and every chained jump adds speed
+        bool jumpPressed = bhopOn ? Input.GetButton("Jump") : Input.GetButtonDown("Jump");
+
+        if (controller.isGrounded && jumpPressed)
+        {
             verticalVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
+            if (bhopOn) bhop.Jumped();
+        }
+
+        if (bhop != null) bhop.Tick(controller.isGrounded, moveAmount > 0.1f);
+
+        float speed = moveSpeed * SpeedFactor() * (bhop != null ? bhop.SpeedMultiplier : 1f);
 
         verticalVelocity += gravity * Time.deltaTime;
 

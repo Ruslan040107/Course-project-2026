@@ -1,0 +1,8 @@
+{
+  "defaults": { "radius": 0.7, "penalty": 0.1, "reveal": 1.0 },
+  "experiments": [
+    { "name": "bhop2_1_vs_0", "rounds": 1000, "swap": true, "params": { "bhop0": 1 } },
+    { "name": "bhop2_2_vs_0", "rounds": 1000, "swap": true, "params": { "bhop0": 2 } },
+    { "name": "bhop2_3_vs_0", "rounds": 1000, "swap": true, "params": { "bhop0": 3 } }
+  ]
+}

@@ -1,11 +1,20 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public struct KillInfo
+{
+    public Health victim;
+    public Health killer;
+    public bool headshot;
+    public bool noScope;
+    public bool inAir;
+    public Health assister;   // dealt enough damage to the victim, but did not make the kill
+}
+
 public class Health : MonoBehaviour
 {
     public static readonly List<Health> All = new List<Health>();
-    // victim, killer, headshot, noscope
-    public static event System.Action<Health, Health, bool, bool> AnyKilled;
+    public static event System.Action<KillInfo> AnyKilled;
     // victim, attacker, damage (not more than the victim had left), headshot
     public static event System.Action<Health, Health, float, bool> AnyDamaged;
 
@@ -20,10 +29,16 @@ public class Health : MonoBehaviour
     // training target: takes damage (and reports it) but never dies
     public bool invulnerable;
 
+    public const float AssistDamage = 41f;
+
+    // damage dealt to this player by every enemy during this life
+    readonly Dictionary<Health, float> damageFrom = new Dictionary<Health, float>();
+
     float pendingDamage;
     Health pendingAttacker;
     bool pendingHeadshot;
     bool pendingNoScope;
+    bool pendingInAir;
     GUIStyle style;
 
     public bool IsDead => current <= 0f;
@@ -58,7 +73,7 @@ public class Health : MonoBehaviour
         All.Remove(this);
     }
 
-    public void TakeDamage(float amount, Health attacker = null, bool headshot = false, bool noScope = false)
+    public void TakeDamage(float amount, Health attacker = null, bool headshot = false, bool noScope = false, bool inAir = false)
     {
         if (IsDead) return;
         if (attacker != null) Damaged?.Invoke(attacker);
@@ -66,6 +81,7 @@ public class Health : MonoBehaviour
         if (attacker != null) pendingAttacker = attacker;
         pendingHeadshot = headshot;
         pendingNoScope = noScope;
+        pendingInAir = inAir;
     }
 
     public void ApplyPending()
@@ -80,12 +96,21 @@ public class Health : MonoBehaviour
             pendingAttacker = null;
             pendingHeadshot = false;
             pendingNoScope = false;
+            pendingInAir = false;
             return;
         }
 
         if (!IsDead)
         {
-            AnyDamaged?.Invoke(this, pendingAttacker, Mathf.Min(pendingDamage, current), pendingHeadshot);
+            float dealt = Mathf.Min(pendingDamage, current);
+
+            if (pendingAttacker != null && pendingAttacker != this && pendingAttacker.team != team)
+            {
+                damageFrom.TryGetValue(pendingAttacker, out float before);
+                damageFrom[pendingAttacker] = before + dealt;
+            }
+
+            AnyDamaged?.Invoke(this, pendingAttacker, dealt, pendingHeadshot);
             current -= pendingDamage;
             if (IsDead) OnDeath();
         }
@@ -95,21 +120,52 @@ public class Health : MonoBehaviour
     public void Revive()
     {
         current = maxHealth;
+        damageFrom.Clear();
         pendingDamage = 0f;
         pendingAttacker = null;
         pendingHeadshot = false;
         pendingNoScope = false;
+        pendingInAir = false;
         SetBodyVisible(true);
         gameObject.SetActive(true);
+    }
+
+    // the enemy who did the most damage (at least AssistDamage), not counting the killer
+    Health FindAssister(Health killer)
+    {
+        Health best = null;
+        float bestDamage = 0f;
+
+        foreach (KeyValuePair<Health, float> pair in damageFrom)
+        {
+            if (pair.Key == null || pair.Key == killer || pair.Value < AssistDamage) continue;
+            if (best == null || pair.Value > bestDamage)
+            {
+                best = pair.Key;
+                bestDamage = pair.Value;
+            }
+        }
+
+        return best;
     }
 
     void OnDeath()
     {
         Debug.Log(name + " died");
-        AnyKilled?.Invoke(this, pendingAttacker, pendingHeadshot, pendingNoScope);
+        AnyKilled?.Invoke(new KillInfo
+        {
+            victim = this,
+            killer = pendingAttacker,
+            headshot = pendingHeadshot,
+            noScope = pendingNoScope,
+            inAir = pendingInAir,
+            assister = FindAssister(pendingAttacker)
+        });
+        damageFrom.Clear();
         pendingAttacker = null;
         pendingHeadshot = false;
         pendingNoScope = false;
+        pendingInAir = false;
 
         if (deactivateOnDeath) gameObject.SetActive(false);
         else SetBodyVisible(false);

@@ -21,6 +21,11 @@ public class RoundManager : MonoBehaviour
     public float radiusFactor = 0.5f;
     public float revealTime = 1f;
 
+    [Header("Bhop for bots (paid movement upgrade, 0 = off)")]
+    [Tooltip("the player's level is set on the Bhop component of the Player object")]
+    public int bhopLevel0;
+    public int bhopLevel1;
+
     [Header("Weapons (bots; leave empty to keep the prefab weapon)")]
     public WeaponData weaponTeam0;
     public WeaponData weaponTeam1;
@@ -55,11 +60,13 @@ public class RoundManager : MonoBehaviour
 
     void Start()
     {
+        ApplyCommandLine();
+
         if (overviewCamera != null) overviewCamera.gameObject.SetActive(simulation);
 
         Weapon.InfiniteAmmo = Solo;
 
-        if (!simulation && FindFirstObjectByType<Scoreboard>() == null) gameObject.AddComponent<Scoreboard>();
+        if (!simulation && FindAnyObjectByType<Scoreboard>() == null) gameObject.AddComponent<Scoreboard>();
         if (trainingTarget != null)
         {
             Health th = trainingTarget.GetComponent<Health>();
@@ -78,6 +85,8 @@ public class RoundManager : MonoBehaviour
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
             Time.timeScale = simTimeScale;
+            Application.targetFrameRate = -1;
+            QualitySettings.vSyncCount = 0;
 
             string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
 
@@ -89,8 +98,17 @@ public class RoundManager : MonoBehaviour
             #endif
             Directory.CreateDirectory(dir);
 
-            csvPath = Path.Combine(dir, "sim_" + stamp + ".csv");
-            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1\n");
+            string customCsv = Arg("-csv");
+            if (customCsv != null)
+            {
+                csvPath = customCsv;
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(customCsv)));
+            }
+            else
+            {
+                csvPath = Path.Combine(dir, "sim_" + stamp + ".csv");
+            }
+            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1,bhop0,bhop1\n");
             Debug.Log("Simulation results: " + csvPath);
         }
 
@@ -98,6 +116,83 @@ public class RoundManager : MonoBehaviour
         StartRound();
         StartCoroutine(ResolveDamage());
     }
+    // ---------------- command line (for background runs) ----------------
+    // example: Game.exe -batchmode -nographics -sim -rounds 500 -stealth0 0 -stealth1 1 -weapon0 AK-47 -weapon1 M4A4 -csv out.csv
+
+    static string Arg(string name)
+    {
+        string[] a = System.Environment.GetCommandLineArgs();
+        for (int i = 0; i < a.Length - 1; i++)
+            if (a[i] == name) return a[i + 1];
+        return null;
+    }
+
+    static bool Flag(string name)
+    {
+        foreach (string a in System.Environment.GetCommandLineArgs())
+            if (a == name) return true;
+        return false;
+    }
+
+    static int ArgInt(string name, int fallback)
+    {
+        string v = Arg(name);
+        return v != null && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out int r) ? r : fallback;
+    }
+
+    static float ArgFloat(string name, float fallback)
+    {
+        string v = Arg(name);
+        return v != null && float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out float r) ? r : fallback;
+    }
+
+    WeaponData FindWeapon(string weaponName)
+    {
+        if (weaponName == "default") return null;
+
+        WeaponData[] all = Resources.LoadAll<WeaponData>("Weapons");
+        foreach (WeaponData w in all)
+        {
+            if (string.Equals(w.weaponName, weaponName, System.StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(w.name, weaponName, System.StringComparison.OrdinalIgnoreCase))
+                return w;
+        }
+
+        string names = "";
+        foreach (WeaponData w in all) names += w.weaponName + ", ";
+        Debug.LogError("Weapon not found: " + weaponName + ". Available (Assets/Resources/Weapons): " + names);
+        return null;
+    }
+
+    void ApplyCommandLine()
+    {
+        if (Flag("-sim")) simulation = true;
+
+        roundsToSimulate = ArgInt("-rounds", roundsToSimulate);
+        simTimeScale = ArgFloat("-timescale", simTimeScale);
+        botsPerTeam = ArgInt("-bots", botsPerTeam);
+        roundTime = ArgFloat("-roundtime", roundTime);
+
+        stealthLevel0 = ArgInt("-stealth0", stealthLevel0);
+        stealthLevel1 = ArgInt("-stealth1", stealthLevel1);
+        speedPenalty = ArgFloat("-penalty", speedPenalty);
+        radiusFactor = ArgFloat("-radius", radiusFactor);
+        revealTime = ArgFloat("-reveal", revealTime);
+
+        bhopLevel0 = ArgInt("-bhop0", bhopLevel0);
+        bhopLevel1 = ArgInt("-bhop1", bhopLevel1);
+
+        string w0 = Arg("-weapon0");
+        if (w0 != null) weaponTeam0 = FindWeapon(w0);
+
+        string w1 = Arg("-weapon1");
+        if (w1 != null) weaponTeam1 = FindWeapon(w1);
+
+        string seed = Arg("-seed");
+        if (seed != null && int.TryParse(seed, NumberStyles.Integer, CultureInfo.InvariantCulture, out int sd))
+            Random.InitState(sd);
+    }
+
     IEnumerator ResolveDamage()
     {
         WaitForFixedUpdate wait = new WaitForFixedUpdate();
@@ -199,6 +294,13 @@ public class RoundManager : MonoBehaviour
 
             h.Revive();
             Place(h, point);
+
+            // bots take the team level, the player keeps the level set on his own Bhop component
+            bool isPlayer = h.GetComponent<PlayerController>() != null;
+            Bhop bh = h.GetComponent<Bhop>();
+            if (bh == null) bh = h.gameObject.AddComponent<Bhop>();
+            if (!isPlayer) bh.level = team == 0 ? bhopLevel0 : bhopLevel1;
+            bh.ResetBonus();
             Weapon w = h.GetComponentInChildren<Weapon>(true);
             if (w != null)
             {
@@ -288,11 +390,12 @@ public class RoundManager : MonoBehaviour
     void LogRound(int winner, int alive0, int alive1, float duration)
     {
         string line = string.Format(CultureInfo.InvariantCulture,
-            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2},{12},{13}\n",
+            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2},{12},{13},{14},{15}\n",
             roundsPlayed, winner, alive0, alive1, Size(0), Size(1),
             stealthLevel0, stealthLevel1, speedPenalty, radiusFactor, revealTime, duration,
             weaponTeam0 != null ? weaponTeam0.weaponName : "default",
-            weaponTeam1 != null ? weaponTeam1.weaponName : "default");
+            weaponTeam1 != null ? weaponTeam1.weaponName : "default",
+            bhopLevel0, bhopLevel1);
         File.AppendAllText(csvPath, line);
     }
 

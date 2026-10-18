@@ -59,7 +59,14 @@ public class Weapon : MonoBehaviour
     // 0..1, how much the shooter moves; the player gets it from PlayerController, bots set it from BotController
     public float ExternalMoveInaccuracy { get; set; }
 
+    // bots set these while they hop
+    public bool ExternalInAir { get; set; }
+    public float ExternalSpreadMultiplier { get; set; } = 1f;
+
     public bool IsMelee => data != null && data.melee;
+
+    // everything except automatic rifles reloads by itself when the magazine gets empty
+    bool AutoReloads => !(data != null && data.category == WeaponCategory.Rifle && data.automatic);
 
     // set by PlayerShoot; bots are always treated as scoped
     public bool Scoped { get; set; } = true;
@@ -163,11 +170,13 @@ public class Weapon : MonoBehaviour
         nextShotTime = Time.time + 1f / fireRate;
         ammo--;
         if (InfiniteAmmo) ammo = magazineSize;
+        if (ammo <= 0 && AutoReloads) StartReload();
 
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
 
-        float mult = movement != null ? movement.SpreadMultiplier : botSpreadMultiplier;
+        bool inAir = movement != null ? !movement.IsGrounded : ExternalInAir;
+        float mult = movement != null ? movement.SpreadMultiplier : botSpreadMultiplier * ExternalSpreadMultiplier;
         bool noScope = data != null && data.scopeFov != null && data.scopeFov.Length > 0 && !Scoped;
         if (noScope) mult *= data.unscopedSpreadMultiplier;
 
@@ -238,7 +247,7 @@ public class Weapon : MonoBehaviour
                     }
                 }
 
-                target.TakeDamage(damage * multiplier, owner, head, noScope);
+                target.TakeDamage(damage * multiplier, owner, head, noScope, inAir);
             }
 
             shot.end = hit.point;
@@ -268,6 +277,7 @@ public class Weapon : MonoBehaviour
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
 
+        bool inAir = movement != null ? !movement.IsGrounded : ExternalInAir;
         Vector3 origin = muzzle.position;
         Vector3 dir = muzzle.forward;
 
@@ -294,7 +304,7 @@ public class Weapon : MonoBehaviour
                 if (toTarget.sqrMagnitude > 0.01f && Vector3.Dot(target.transform.forward, toTarget.normalized) > 0.5f)
                     dmg = stab ? data.backstabDamage : data.backstabDamage * 0.5f;
 
-                target.TakeDamage(dmg, owner, false);
+                target.TakeDamage(dmg, owner, false, false, inAir);
             }
 
             shot.end = hit.point;

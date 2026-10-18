@@ -1,0 +1,10 @@
+{
+  "defaults": { "penalty": 0.1, "reveal": 1.0 },
+  "experiments": [
+    { "name": "stealth1_r0.8", "rounds": 1000, "swap": true, "params": { "stealth0": 1, "radius": 0.8 } },
+    { "name": "stealth2_r0.8", "rounds": 1000, "swap": true, "params": { "stealth0": 2, "radius": 0.8 } },
+    { "name": "stealth2_r0.9", "rounds": 1000, "swap": true, "params": { "stealth0": 2, "radius": 0.9 } },
+    { "name": "stealth3_r0.8", "rounds": 1000, "swap": true, "params": { "stealth0": 3, "radius": 0.8 } },
+    { "name": "stealth3_r0.9", "rounds": 1000, "swap": true, "params": { "stealth0": 3, "radius": 0.9 } }
+  ]
+}

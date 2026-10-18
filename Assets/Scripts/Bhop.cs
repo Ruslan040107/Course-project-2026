@@ -26,6 +26,28 @@ public class Bhop : MonoBehaviour
     public float Bonus => bonus;
     public float SpeedMultiplier => 1f + bonus;
 
+    [Tooltip("show the level and the current bonus on screen (only for the player)")]
+    public bool showHud = true;
+    GUIStyle style;
+
+    void OnGUI()
+    {
+        if (!showHud || !Enabled || GetComponent<PlayerController>() == null) return;
+
+        Health h = GetComponent<Health>();
+        if (h != null && h.IsDead) return;
+
+        if (style == null)
+        {
+            style = new GUIStyle(GUI.skin.label);
+            style.fontSize = 20;
+            style.normal.textColor = new Color(1f, 1f, 1f, 0.8f);
+        }
+
+        GUI.Label(new Rect(20f, Screen.height - 85f, 300f, 30f),
+            "BHOP " + level + "   +" + Mathf.RoundToInt(bonus * 100f) + "%", style);
+    }
+
     public void ResetBonus()
     {
         bonus = 0f;

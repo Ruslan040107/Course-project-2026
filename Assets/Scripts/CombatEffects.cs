@@ -18,6 +18,7 @@ public class CombatEffects : MonoBehaviour
     [Header("Other")]
     public Texture2D headshotIcon;
     public Texture2D noScopeIcon;
+    public Texture2D jumpIcon;
     public float maxEffectDistance = 80f;
 
     class Tracer
@@ -39,8 +40,9 @@ public class CombatEffects : MonoBehaviour
     {
         public bool headshot;
         public bool noScope;
-        public string killer, victim;
-        public int killerTeam, victimTeam;
+        public bool inAir;
+        public string killer, victim, assister;
+        public int killerTeam, victimTeam, assisterTeam;
         public float expire;
     }
 
@@ -59,6 +61,7 @@ public class CombatEffects : MonoBehaviour
     GUIStyle feedStyle;
     Texture2D headIcon;
     Texture2D noScopeTex;
+    Texture2D jumpTex;
 
     void Awake()
     {
@@ -89,6 +92,7 @@ public class CombatEffects : MonoBehaviour
         bloodSprite = MakeSprite(MakeSplat(64));
         headIcon = headshotIcon != null ? headshotIcon : MakeHeadIcon(32);
         noScopeTex = noScopeIcon != null ? noScopeIcon : MakeNoScopeIcon(32);
+        jumpTex = jumpIcon != null ? jumpIcon : MakeJumpIcon(32);
 
         flashFx = MakeParticles("Flash", softMat, new Color(1f, 0.9f, 0.6f, 1f), 0.35f, 0.05f, 0f, 0.1f, 0f, 5f);
         sparkFx = MakeParticles("Sparks", softMat, new Color(1f, 0.85f, 0.45f, 1f), 0.04f, 0.4f, 2f, 5f, 1.2f, 35f);
@@ -139,6 +143,9 @@ public class CombatEffects : MonoBehaviour
         Health.AnyKilled += OnKilled;
         RoundManager.RoundStarted += ClearDecals;
         subscribed = true;
+
+        // killed players fall over instead of vanishing
+        if (GetComponent<Corpses>() == null) gameObject.AddComponent<Corpses>();
     }
 
     ParticleSystem MakeParticles(string name, Material mat, Color color, float size, float life,
@@ -202,8 +209,13 @@ public class CombatEffects : MonoBehaviour
 
         bool byPlayer = s.shooter != null && s.shooter.GetComponent<PlayerController>() != null;
 
+        // the player's shots start at the muzzle of the weapon model, it draws its own flash
+        Vector3 modelMuzzle = Vector3.zero;
+        bool fromModel = byPlayer && ViewModel.TryGetMuzzle(s.shooter, out modelMuzzle);
         Vector3 muzzlePos = s.muzzle.position;
-        if (byPlayer)
+        if (fromModel)
+            muzzlePos = modelMuzzle;
+        else if (byPlayer)
             muzzlePos += s.muzzle.forward * 0.55f + s.muzzle.right * 0.16f - s.muzzle.up * 0.12f;
         else
             muzzlePos += s.muzzle.forward * 0.6f;
@@ -214,7 +226,7 @@ public class CombatEffects : MonoBehaviour
             float dist = toEnd.magnitude;
             if (dist > 1f) SpawnTracer(muzzlePos, toEnd / dist, dist);
 
-            Burst(flashFx, muzzlePos, s.muzzle.forward, 2);
+            if (!fromModel) Burst(flashFx, muzzlePos, s.muzzle.forward, 2);
             flashLight.transform.position = muzzlePos;
             flashLight.enabled = true;
             flashTimer = 0.05f;
@@ -247,8 +259,14 @@ public class CombatEffects : MonoBehaviour
         }
     }
 
-    void OnKilled(Health victim, Health killer, bool headshot, bool noScope)
+    void OnKilled(KillInfo k)
     {
+        Health victim = k.victim;
+        Health killer = k.killer;
+        bool headshot = k.headshot;
+        bool noScope = k.noScope;
+        bool inAir = k.inAir;
+
         Burst(bloodFx, victim.transform.position + Vector3.up * 0.4f, Vector3.up, headshot ? 55 : 40);
         SpawnFloorBlood(victim.transform.position, 1.1f);
 
@@ -256,10 +274,13 @@ public class CombatEffects : MonoBehaviour
         {
             killer = killer != null ? killer.name : "World",
             killerTeam = killer != null ? killer.team : -1,
+            assister = k.assister != null ? k.assister.name : null,
+            assisterTeam = k.assister != null ? k.assister.team : -1,
             victim = victim.name,
             victimTeam = victim.team,
             headshot = headshot,
             noScope = noScope,
+            inAir = inAir,
             expire = Time.time + 6f
         });
         if (feed.Count > 5) feed.RemoveAt(0);
@@ -380,6 +401,27 @@ public class CombatEffects : MonoBehaviour
         feed.Clear();
     }
 
+    // arrow up over a ground line
+    static Texture2D MakeJumpIcon(int size)
+    {
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float u = (x + 0.5f) / size;
+                float v = (y + 0.5f) / size;
+                bool head = v > 0.58f && v < 0.92f && Mathf.Abs(u - 0.5f) <= 0.28f * (0.92f - v) / 0.34f;
+                bool shaft = Mathf.Abs(u - 0.5f) < 0.07f && v > 0.30f && v <= 0.60f;
+                bool ground = v > 0.10f && v < 0.19f && u > 0.2f && u < 0.8f;
+                tex.SetPixel(x, y, head || shaft || ground ? Color.white : Color.clear);
+            }
+
+        tex.Apply();
+        return tex;
+    }
+
     // crossed-out scope: a ring with a crosshair and a red strike
     static Texture2D MakeNoScopeIcon(int size)
     {
@@ -480,15 +522,37 @@ public class CombatEffects : MonoBehaviour
             Vector2 sa = feedStyle.CalcSize(a);
             Vector2 sm = feedStyle.CalcSize(m);
             Vector2 sb = feedStyle.CalcSize(b);
-            float iconW = (e.noScope ? icon + 6f : 0f) + (e.headshot ? icon + 6f : 0f);
-            float x = Screen.width - 20f - (sa.x + sm.x + iconW + sb.x);
+
+            bool hasAssist = !string.IsNullOrEmpty(e.assister);
+            GUIContent plus = new GUIContent(" + ");
+            GUIContent c = new GUIContent(hasAssist ? e.assister : "");
+            Vector2 sp = hasAssist ? feedStyle.CalcSize(plus) : Vector2.zero;
+            Vector2 sc = hasAssist ? feedStyle.CalcSize(c) : Vector2.zero;
+            float assistW = sp.x + sc.x;
+            float iconW = (e.inAir ? icon + 6f : 0f) + (e.noScope ? icon + 6f : 0f) + (e.headshot ? icon + 6f : 0f);
+            float x = Screen.width - 20f - (sa.x + assistW + sm.x + iconW + sb.x);
 
             GUI.contentColor = TeamColor(e.killerTeam);
             GUI.Label(new Rect(x, y, sa.x, sa.y), a, feedStyle);
-            GUI.contentColor = Color.white;
-            GUI.Label(new Rect(x + sa.x, y, sm.x, sm.y), m, feedStyle);
 
-            float ix = x + sa.x + sm.x;
+            if (hasAssist)
+            {
+                GUI.contentColor = Color.white;
+                GUI.Label(new Rect(x + sa.x, y, sp.x, sp.y), plus, feedStyle);
+                GUI.contentColor = TeamColor(e.assisterTeam);
+                GUI.Label(new Rect(x + sa.x + sp.x, y, sc.x, sc.y), c, feedStyle);
+            }
+
+            GUI.contentColor = Color.white;
+            GUI.Label(new Rect(x + sa.x + assistW, y, sm.x, sm.y), m, feedStyle);
+
+            float ix = x + sa.x + assistW + sm.x;
+
+            if (e.inAir && jumpTex != null)
+            {
+                GUI.DrawTexture(new Rect(ix, y + (sa.y - icon) * 0.5f, icon, icon), jumpTex);
+                ix += icon + 6f;
+            }
 
             if (e.noScope && noScopeTex != null)
             {
@@ -500,7 +564,7 @@ public class CombatEffects : MonoBehaviour
                 GUI.DrawTexture(new Rect(ix, y + (sa.y - icon) * 0.5f, icon, icon), headIcon);
 
             GUI.contentColor = TeamColor(e.victimTeam);
-            GUI.Label(new Rect(x + sa.x + sm.x + iconW, y, sb.x, sb.y), b, feedStyle);
+            GUI.Label(new Rect(x + sa.x + assistW + sm.x + iconW, y, sb.x, sb.y), b, feedStyle);
 
             y += sa.y + 2f;
         }

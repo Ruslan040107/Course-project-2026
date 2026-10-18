@@ -5,7 +5,6 @@ using UnityEngine;
 public class Scoreboard : MonoBehaviour
 {
     public KeyCode key = KeyCode.Tab;
-    [Tooltip("damage to a victim needed for an assist")] public float assistDamage = 41f;
 
     [Header("Texts")]
     public string titleT = "TERRORISTS";
@@ -36,7 +35,6 @@ public class Scoreboard : MonoBehaviour
     }
 
     readonly Dictionary<Health, Stats> stats = new Dictionary<Health, Stats>();
-    readonly Dictionary<Health, Dictionary<Health, float>> roundDamage = new Dictionary<Health, Dictionary<Health, float>>();
 
     RoundManager rounds;
     PlayerController player;
@@ -54,14 +52,12 @@ public class Scoreboard : MonoBehaviour
     {
         Health.AnyKilled += OnKilled;
         Health.AnyDamaged += OnDamaged;
-        RoundManager.RoundStarted += OnRoundStarted;
     }
 
     void OnDisable()
     {
         Health.AnyKilled -= OnKilled;
         Health.AnyDamaged -= OnDamaged;
-        RoundManager.RoundStarted -= OnRoundStarted;
     }
 
     Stats Get(Health h)
@@ -74,29 +70,20 @@ public class Scoreboard : MonoBehaviour
         return s;
     }
 
-    void OnRoundStarted()
-    {
-        roundDamage.Clear();
-    }
-
     void OnDamaged(Health victim, Health attacker, float amount, bool head)
     {
         if (victim == null || attacker == null || attacker == victim) return;
         if (attacker.team == victim.team || victim.invulnerable) return;
 
         Get(attacker).damage += amount;
-
-        if (!roundDamage.TryGetValue(victim, out Dictionary<Health, float> d))
-        {
-            d = new Dictionary<Health, float>();
-            roundDamage[victim] = d;
-        }
-
-        d.TryGetValue(attacker, out float cur);
-        d[attacker] = cur + amount;
     }
 
-    void OnKilled(Health victim, Health killer, bool head, bool noScope)
+    void OnKilled(KillInfo info)
+    {
+        Kill(info.victim, info.killer, info.headshot, info.assister);
+    }
+
+    void Kill(Health victim, Health killer, bool head, Health assister)
     {
         if (victim == null || victim.invulnerable) return;
 
@@ -109,14 +96,7 @@ public class Scoreboard : MonoBehaviour
             if (head) k.headshots++;
         }
 
-        if (roundDamage.TryGetValue(victim, out Dictionary<Health, float> d))
-        {
-            foreach (KeyValuePair<Health, float> pair in d)
-            {
-                if (pair.Key == null || pair.Key == killer || pair.Key.team == victim.team) continue;
-                if (pair.Value >= assistDamage) Get(pair.Key).assists++;
-            }
-        }
+        if (assister != null && assister != victim) Get(assister).assists++;
     }
 
     List<Row> Roster(int team)
@@ -175,10 +155,10 @@ public class Scoreboard : MonoBehaviour
     {
         if (!Input.GetKey(key)) return;
 
-        if (rounds == null) rounds = FindFirstObjectByType<RoundManager>();
+        if (rounds == null) rounds = FindAnyObjectByType<RoundManager>();
         if (player == null)
         {
-            player = FindFirstObjectByType<PlayerController>();
+            player = FindAnyObjectByType<PlayerController>();
             playerHealth = player != null ? player.GetComponent<Health>() : null;
         }
 

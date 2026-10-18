@@ -569,8 +569,8 @@ MonoBehaviour:
   damage: 25
   headMultiplier: 3
   legMultiplier: 0.75
-  headZone: 0.82
-  legZone: 0.38
+  headZoneStart: 0.72
+  legZoneEnd: 0.35
   fireRate: 8
   range: 100
   spreadAngle: 1
@@ -1524,6 +1524,7 @@ MonoBehaviour:
   decalFadeTime: 4
   headshotIcon: {fileID: 2800000, guid: ad78b139607381b47b5cf075577f75ee, type: 3}
   noScopeIcon: {fileID: 2800000, guid: 390325ec540e2034aab11efb04c87978, type: 3}
+  jumpIcon: {fileID: 2800000, guid: 17ed0aa81c476244fa877e0d8eb878ed, type: 3}
   maxEffectDistance: 80
 --- !u!4 &849740353
 Transform:
@@ -2577,9 +2578,11 @@ MonoBehaviour:
   speedPenalty: 0.1
   radiusFactor: 0.7
   revealTime: 1
-  weaponTeam0: {fileID: 11400000, guid: c83cde50ed5a16841ab86f3580684d2f, type: 2}
+  bhopLevel0: 1
+  bhopLevel1: 1
+  weaponTeam0: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
   weaponTeam1: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
-  soloMode: 0
+  soloMode: 1
   trainingTarget: {fileID: 1048157121}
   botsPerTeam: 5
   roundTime: 60
@@ -2753,6 +2756,7 @@ GameObject:
   - component: {fileID: 1913474543}
   - component: {fileID: 1913474545}
   - component: {fileID: 1913474546}
+  - component: {fileID: 1913474547}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -2990,14 +2994,40 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerLoadout
   weapon: {fileID: 330585548}
   slots:
-  - {fileID: 11400000, guid: 2153ba9047bdd194f9591cd4de88e6d4, type: 2}
   - {fileID: 11400000, guid: 7d308d316dfddd54ca90b1f2eeebb508, type: 2}
+  - {fileID: 11400000, guid: 2153ba9047bdd194f9591cd4de88e6d4, type: 2}
   - {fileID: 11400000, guid: c83cde50ed5a16841ab86f3580684d2f, type: 2}
   - {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
   - {fileID: 11400000, guid: 8a4e7c12f29b9544dab22d1c360a364d, type: 2}
   - {fileID: 11400000, guid: 48a1e13c2b0df4b46a3e17a40e1e9402, type: 2}
   - {fileID: 11400000, guid: 8dd3beb021baa2141860de9decc92175, type: 2}
   - {fileID: 11400000, guid: 67607c41f2ad09e48abe87e81991c084, type: 2}
+--- !u!114 &1913474547
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1913474535}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c84f15bd34d67d746bb53860ea08253e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Bhop
+  level: 3
+  gainPerJump:
+  - 0
+  - 0.08
+  - 0.1
+  - 0.12
+  maxBonus:
+  - 0
+  - 0.25
+  - 0.5
+  - 0.8
+  chainWindow: 0.2
+  decayPerSecond: 1.5
+  showHud: 1
 --- !u!1 &1924003851
 GameObject:
   m_ObjectHideFlags: 0

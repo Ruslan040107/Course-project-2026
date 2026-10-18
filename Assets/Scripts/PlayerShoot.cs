@@ -84,6 +84,11 @@ public class PlayerShoot : MonoBehaviour
         {
             baseFov = cam.fieldOfView;
             currentFov = baseFov;
+
+            // the weapon model in the hands
+            ViewModel vm = cam.GetComponent<ViewModel>();
+            if (vm == null) vm = cam.gameObject.AddComponent<ViewModel>();
+            vm.Init(weapon, this, health);
         }
     }
 

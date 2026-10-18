@@ -8,6 +8,12 @@ public class WeaponData : ScriptableObject
     public string weaponName = "Weapon";
     public WeaponCategory category;
 
+    [Header("Model in the hands (optional)")]
+    [Tooltip("your own first person model; empty = the model built from simple shapes. " +
+             "Barrel along +Z, Y up, real size in meters, origin at the grip. " +
+             "Optional empty children: Muzzle, Eject, Mag, Slide (or Bolt), Hands")]
+    public GameObject viewModelPrefab;
+
     [Header("Economy")]
     public int price = 0;
     public int killReward = 300;

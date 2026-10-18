@@ -112,3 +112,7 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# batch experiments: per-process parts and python cache
+Analysis/data/_parts/
+__pycache__/
