@@ -19,6 +19,8 @@ public class CombatEffects : MonoBehaviour
     public Texture2D headshotIcon;
     public Texture2D noScopeIcon;
     public Texture2D jumpIcon;
+    [Tooltip("empty: Resources/KillIcons/wallbang")]
+    public Texture2D wallbangIcon;
     public float maxEffectDistance = 80f;
 
     class Tracer
@@ -41,14 +43,32 @@ public class CombatEffects : MonoBehaviour
         public bool headshot;
         public bool noScope;
         public bool inAir;
+        public bool wallbang;
+        public WeaponData weapon;
+        public Texture2D weaponIcon;   // null: a ">" is drawn instead
         public string killer, victim, assister;
         public int killerTeam, victimTeam, assisterTeam;
+        // the player took part: made the kill, the assist, or was killed
+        public bool playerKiller, playerAssister, playerVictim;
         public float expire;
+    }
+
+    // one piece of a killfeed line: a text or an icon
+    struct FeedPart
+    {
+        public GUIContent text;
+        public Texture2D icon;
+        public float width, height;
+        public Color color;
     }
 
     readonly List<Tracer> tracers = new List<Tracer>();
     readonly List<Decal> decals = new List<Decal>();
     readonly List<FeedEntry> feed = new List<FeedEntry>();
+    readonly List<FeedPart> parts = new List<FeedPart>();
+    // weapon name -> killfeed icon (Resources/KillIcons/<name>), null if there is none
+    readonly Dictionary<string, Texture2D> weaponIcons = new Dictionary<string, Texture2D>();
+    readonly Collider[] overlap = new Collider[8];
 
     int nextTracer, nextDecal;
     bool subscribed;
@@ -62,11 +82,14 @@ public class CombatEffects : MonoBehaviour
     Texture2D headIcon;
     Texture2D noScopeTex;
     Texture2D jumpTex;
+    Texture2D wallbangTex;
 
     void Awake()
     {
-        RoundManager rm = FindAnyObjectByType<RoundManager>();  
-        if (rm != null && rm.simulation)
+        // background runs pass -sim on the command line; RoundManager reads it only in Start, after this Awake
+        RoundManager rm = FindAnyObjectByType<RoundManager>();
+        bool simFlag = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-sim") >= 0;
+        if ((rm != null && rm.simulation) || simFlag)
         {
             enabled = false;
             return;
@@ -79,6 +102,7 @@ public class CombatEffects : MonoBehaviour
         RoundManager.RoundStarted -= ClearDecals;
         if (!subscribed) return;
         Weapon.AnyShot -= OnShot;
+        Weapon.AnyPenetration -= OnPenetration;
         Health.AnyKilled -= OnKilled;
     }
 
@@ -93,6 +117,8 @@ public class CombatEffects : MonoBehaviour
         headIcon = headshotIcon != null ? headshotIcon : MakeHeadIcon(32);
         noScopeTex = noScopeIcon != null ? noScopeIcon : MakeNoScopeIcon(32);
         jumpTex = jumpIcon != null ? jumpIcon : MakeJumpIcon(32);
+        wallbangTex = wallbangIcon != null ? wallbangIcon : Resources.Load<Texture2D>("KillIcons/wallbang");
+        if (wallbangTex == null) wallbangTex = MakeWallbangIcon(32);
 
         flashFx = MakeParticles("Flash", softMat, new Color(1f, 0.9f, 0.6f, 1f), 0.35f, 0.05f, 0f, 0.1f, 0f, 5f);
         sparkFx = MakeParticles("Sparks", softMat, new Color(1f, 0.85f, 0.45f, 1f), 0.04f, 0.4f, 2f, 5f, 1.2f, 35f);
@@ -140,6 +166,7 @@ public class CombatEffects : MonoBehaviour
         flashLight.enabled = false;
 
         Weapon.AnyShot += OnShot;
+        Weapon.AnyPenetration += OnPenetration;
         Health.AnyKilled += OnKilled;
         RoundManager.RoundStarted += ClearDecals;
         subscribed = true;
@@ -223,6 +250,8 @@ public class CombatEffects : MonoBehaviour
             muzzlePos = modelMuzzle;
         else if (byPlayer)
             muzzlePos += s.muzzle.forward * 0.55f + s.muzzle.right * 0.16f - s.muzzle.up * 0.12f;
+        else if (BotWeaponModels.TryGetMuzzle(s.shooter, out Vector3 gunMuzzle))
+            muzzlePos = gunMuzzle;   // the gun model in the bot's hand (CharacterBody fist or under the head)
         else
             muzzlePos += s.muzzle.forward * 0.6f;
 
@@ -240,7 +269,9 @@ public class CombatEffects : MonoBehaviour
 
         if (!s.hit) return;
 
-        bool damaging = s.target != null && s.shooter != null && s.target.team != s.shooter.team;
+        // any player or bot that was hit bleeds, teammates too while friendly fire is on
+        bool damaging = s.target != null && s.target != s.shooter &&
+                        (s.shooter == null || s.target.team != s.shooter.team || Weapon.FriendlyFire);
 
         if (s.melee && !damaging) return;
 
@@ -265,6 +296,70 @@ public class CombatEffects : MonoBehaviour
         }
     }
 
+    // a bullet went through an object: a hole where it went in and where it came out
+    void OnPenetration(Vector3 entry, Vector3 entryNormal, Vector3 exit, Vector3 exitNormal)
+    {
+        Camera cam = Camera.main;
+        if (cam == null) return;
+
+        Vector3 camPos = cam.transform.position;
+        float max2 = maxEffectDistance * maxEffectDistance;
+        bool entryNear = (entry - camPos).sqrMagnitude <= max2;
+        bool exitNear = (exit - camPos).sqrMagnitude <= max2;
+
+        // the bullet went through a player or a bot (an enemy or a teammate): blood on both sides, no holes
+        Health body = BodyAt(entry);
+        if (body != null)
+        {
+            if (entryNear)
+            {
+                Burst(bloodFx, entry, entryNormal, 10);
+                SpawnFloorBlood(body.transform.position, 0.3f);
+            }
+            if (exitNear && BodyAt(exit) != null) Burst(bloodFx, exit, exitNormal, 12);
+            return;
+        }
+
+        if (entryNear)
+        {
+            Burst(sparkFx, entry, entryNormal, 5);
+            Burst(dustFx, entry, entryNormal, 4);
+            SpawnDecal(holeSprite, entry, entryNormal, 0.14f, new Color(1f, 1f, 1f, 0.9f));
+        }
+
+        // a wall exit right on a body gets no hole (it would hang in the air when they move)
+        if (exitNear && BodyAt(exit) == null)
+        {
+            Burst(dustFx, exit, exitNormal, 6);
+            SpawnDecal(holeSprite, exit, exitNormal, 0.16f, new Color(1f, 1f, 1f, 0.9f));
+        }
+    }
+
+    // the player or bot the point is on, null if it is not on a body
+    Health BodyAt(Vector3 point)
+    {
+        int n = Physics.OverlapSphereNonAlloc(point, 0.05f, overlap, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; i++)
+        {
+            Health h = overlap[i].GetComponentInParent<Health>();
+            if (h != null) return h;
+        }
+        return null;
+    }
+
+    // killfeed picture of a weapon: Resources/KillIcons/<weapon name>, loaded once
+    Texture2D WeaponIcon(WeaponData weapon)
+    {
+        if (weapon == null || string.IsNullOrEmpty(weapon.weaponName)) return null;
+
+        if (!weaponIcons.TryGetValue(weapon.weaponName, out Texture2D tex))
+        {
+            tex = Resources.Load<Texture2D>("KillIcons/" + weapon.weaponName);
+            weaponIcons[weapon.weaponName] = tex;
+        }
+        return tex;
+    }
+
     void OnKilled(KillInfo k)
     {
         Health victim = k.victim;
@@ -284,18 +379,30 @@ public class CombatEffects : MonoBehaviour
             assisterTeam = k.assister != null ? k.assister.team : -1,
             victim = victim.name,
             victimTeam = victim.team,
+            playerKiller = IsPlayer(killer),
+            playerAssister = IsPlayer(k.assister),
+            playerVictim = IsPlayer(victim),
             headshot = headshot,
             noScope = noScope,
             inAir = inAir,
+            wallbang = k.wallbang,
+            weapon = k.weapon,
+            weaponIcon = WeaponIcon(k.weapon),
             expire = Time.time + 6f
         });
         if (feed.Count > 5) feed.RemoveAt(0);
 
-        if (killer != null && killer.GetComponent<PlayerController>() != null)
+        if (IsPlayer(killer))
         {
             hitMarkerUntil = Time.time + 0.35f;
             hitMarkerColor = new Color(1f, 0.25f, 0.25f);
         }
+    }
+
+    // the Health of the human player (not a bot or a training target)
+    static bool IsPlayer(Health h)
+    {
+        return h != null && h.GetComponent<PlayerController>() != null;
     }
 
     void SpawnTracer(Vector3 start, Vector3 dir, float total)
@@ -428,6 +535,42 @@ public class CombatEffects : MonoBehaviour
         return tex;
     }
 
+    // wall slab with a hole and a bullet streak with sparks coming out of it to the right
+    static Texture2D MakeWallbangIcon(int size)
+    {
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 tip = new Vector2(0.84f, 0.55f);
+        Vector2[] rays = { new Vector2(1f, 0f), new Vector2(0.77f, 0.64f), new Vector2(0.77f, -0.64f) };
+
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float u = (x + 0.5f) / size;
+                float v = (y + 0.5f) / size;
+                float hu = (u - 0.22f) / 0.07f;
+                float hv = (v - 0.55f) / 0.11f;
+                bool hole = hu * hu + hv * hv < 1f;
+                bool slab = u > 0.08f && u < 0.36f && v > 0.08f && v < 0.92f && !hole;
+                bool streak = u > 0.44f && u < 0.78f && Mathf.Abs(v - 0.55f) < 0.02f + 0.04f * (u - 0.44f) / 0.34f;
+
+                bool spark = false;
+                Vector2 d = new Vector2(u, v) - tip;
+                foreach (Vector2 r in rays)
+                {
+                    float along = Vector2.Dot(d, r);
+                    float across = Mathf.Abs(d.x * r.y - d.y * r.x);
+                    if (along > 0.05f && along < 0.13f && across < 0.025f) spark = true;
+                }
+
+                tex.SetPixel(x, y, slab || streak || spark ? Color.white : Color.clear);
+            }
+
+        tex.Apply();
+        return tex;
+    }
+
     // crossed-out scope: a ring with a crosshair and a red strike
     static Texture2D MakeNoScopeIcon(int size)
     {
@@ -515,66 +658,108 @@ public class CombatEffects : MonoBehaviour
             feedStyle.fontStyle = FontStyle.Bold;
         }
 
+        // killer [+ assister] [jump] [noscope] WEAPON [wallbang] [headshot] victim, right-aligned
         float y = 70f;
-        float icon = 22f;
+        float lineH = feedStyle.CalcSize(new GUIContent("Ag")).y;
+        float flagH = Mathf.Round(lineH - 4f);   // jump, noscope, wallbang and headshot icons
+        float gap = 6f;
 
         foreach (FeedEntry e in feed)
         {
             if (Time.time > e.expire) continue;
 
-            GUIContent a = new GUIContent(e.killer);
-            GUIContent m = new GUIContent("  >  ");
-            GUIContent b = new GUIContent(e.victim);
-            Vector2 sa = feedStyle.CalcSize(a);
-            Vector2 sm = feedStyle.CalcSize(m);
-            Vector2 sb = feedStyle.CalcSize(b);
-
-            bool hasAssist = !string.IsNullOrEmpty(e.assister);
-            GUIContent plus = new GUIContent(" + ");
-            GUIContent c = new GUIContent(hasAssist ? e.assister : "");
-            Vector2 sp = hasAssist ? feedStyle.CalcSize(plus) : Vector2.zero;
-            Vector2 sc = hasAssist ? feedStyle.CalcSize(c) : Vector2.zero;
-            float assistW = sp.x + sc.x;
-            float iconW = (e.inAir ? icon + 6f : 0f) + (e.noScope ? icon + 6f : 0f) + (e.headshot ? icon + 6f : 0f);
-            float x = Screen.width - 20f - (sa.x + assistW + sm.x + iconW + sb.x);
-
-            GUI.contentColor = TeamColor(e.killerTeam);
-            GUI.Label(new Rect(x, y, sa.x, sa.y), a, feedStyle);
-
-            if (hasAssist)
+            parts.Clear();
+            AddText(e.killer, TeamColor(e.killerTeam));
+            if (!string.IsNullOrEmpty(e.assister))
             {
-                GUI.contentColor = Color.white;
-                GUI.Label(new Rect(x + sa.x, y, sp.x, sp.y), plus, feedStyle);
-                GUI.contentColor = TeamColor(e.assisterTeam);
-                GUI.Label(new Rect(x + sa.x + sp.x, y, sc.x, sc.y), c, feedStyle);
+                AddText(" + ", Color.white);
+                AddText(e.assister, TeamColor(e.assisterTeam));
+            }
+            if (e.inAir) AddIcon(jumpTex, flagH);
+            if (e.noScope) AddIcon(noScopeTex, flagH);
+            if (e.weaponIcon != null) AddIcon(e.weaponIcon, lineH);
+            else AddText("  >  ", Color.white);   // fall, out of the map, or no icon for this weapon
+            if (e.wallbang) AddIcon(wallbangTex, flagH);
+            if (e.headshot) AddIcon(headIcon, flagH);
+            AddText(e.victim, TeamColor(e.victimTeam));
+
+            // a gap before and after every icon, texts follow each other directly
+            float total = 0f;
+            for (int i = 0; i < parts.Count; i++)
+                total += parts[i].width + PartGap(i, gap);
+
+            float x = Screen.width - 20f - total;
+            float alpha = Mathf.Clamp01((e.expire - Time.time) / 0.5f);   // fades out in the last half second
+            Rect back = new Rect(x - 6f, y - 2f, total + 12f, lineH + 4f);
+
+            // like in CS: the player's kills and assists get a red frame and a stronger reddish background,
+            // the player's own death a dark red background
+            Color backColor = new Color(0f, 0f, 0f, 0.35f);
+            if (e.playerVictim) backColor = new Color(0.45f, 0.04f, 0.04f, 0.75f);
+            else if (e.playerKiller || e.playerAssister) backColor = new Color(0.22f, 0.05f, 0.05f, 0.6f);
+            backColor.a *= alpha;
+
+            GUI.color = backColor;
+            GUI.DrawTexture(back, Texture2D.whiteTexture);
+
+            if (e.playerKiller || e.playerAssister)
+                DrawFrame(back, 2f, new Color(0.95f, 0.2f, 0.2f, alpha));
+
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+
+            for (int i = 0; i < parts.Count; i++)
+            {
+                FeedPart p = parts[i];
+                x += PartGap(i, gap);
+
+                if (p.icon != null)
+                {
+                    GUI.DrawTexture(new Rect(x, y + (lineH - p.height) * 0.5f, p.width, p.height), p.icon);
+                }
+                else
+                {
+                    GUI.contentColor = p.color;
+                    GUI.Label(new Rect(x, y, p.width, lineH), p.text, feedStyle);
+                }
+                x += p.width;
             }
 
-            GUI.contentColor = Color.white;
-            GUI.Label(new Rect(x + sa.x + assistW, y, sm.x, sm.y), m, feedStyle);
-
-            float ix = x + sa.x + assistW + sm.x;
-
-            if (e.inAir && jumpTex != null)
-            {
-                GUI.DrawTexture(new Rect(ix, y + (sa.y - icon) * 0.5f, icon, icon), jumpTex);
-                ix += icon + 6f;
-            }
-
-            if (e.noScope && noScopeTex != null)
-            {
-                GUI.DrawTexture(new Rect(ix, y + (sa.y - icon) * 0.5f, icon, icon), noScopeTex);
-                ix += icon + 6f;
-            }
-
-            if (e.headshot && headIcon != null)
-                GUI.DrawTexture(new Rect(ix, y + (sa.y - icon) * 0.5f, icon, icon), headIcon);
-
-            GUI.contentColor = TeamColor(e.victimTeam);
-            GUI.Label(new Rect(x + sa.x + assistW + sm.x + iconW, y, sb.x, sb.y), b, feedStyle);
-
-            y += sa.y + 2f;
+            y += lineH + 6f;
         }
+        GUI.color = Color.white;
         GUI.contentColor = Color.white;
+    }
+
+    // a frame of the given thickness along the inner edge of the rect
+    static void DrawFrame(Rect r, float thick, Color color)
+    {
+        GUI.color = color;
+        GUI.DrawTexture(new Rect(r.x, r.y, r.width, thick), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(r.x, r.yMax - thick, r.width, thick), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(r.x, r.y + thick, thick, r.height - thick * 2f), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(r.xMax - thick, r.y + thick, thick, r.height - thick * 2f), Texture2D.whiteTexture);
+    }
+
+    void AddText(string text, Color color)
+    {
+        GUIContent c = new GUIContent(text);
+        parts.Add(new FeedPart { text = c, width = feedStyle.CalcSize(c).x, color = color });
+    }
+
+    // icon of the given height, the width keeps its aspect
+    void AddIcon(Texture2D icon, float height)
+    {
+        if (icon == null) return;
+        float width = height * icon.width / Mathf.Max(1, icon.height);
+        parts.Add(new FeedPart { icon = icon, width = width, height = height });
+    }
+
+    // space before part i: next to an icon there is a gap, between two texts there is none
+    float PartGap(int i, float gap)
+    {
+        if (i == 0) return 0f;
+        bool textPair = parts[i].icon == null && parts[i - 1].icon == null;
+        return textPair ? 0f : gap;
     }
 
     static Texture2D MakeSoftCircle(int size, float hardness)

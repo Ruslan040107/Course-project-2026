@@ -28,7 +28,8 @@ public class DamageFlash : MonoBehaviour
     void OnDamaged(Health attacker)
     {
         if (attacker == null || attacker == health) return;
-        if (attacker.team == health.team) return;
+        // a teammate's shot hurts only with friendly fire
+        if (attacker.team == health.team && !Weapon.FriendlyFire) return;
 
         intensity = 1f;
     }

@@ -31,7 +31,7 @@ PARTS = os.path.join(DATA, "_parts")
 # settings that are passed to the game as "-<key> <value>"
 PARAMS = ["map", "bots", "roundtime", "timescale",
           "stealth0", "stealth1", "penalty", "radius", "reveal",
-          "weapon0", "weapon1", "bhop0", "bhop1"]
+          "weapon0", "weapon1", "bhop0", "bhop1", "penetration", "ff", "sneak"]
 
 # pairs that are exchanged for the mirrored run
 SWAP = [("stealth0", "stealth1"), ("weapon0", "weapon1"), ("bhop0", "bhop1")]

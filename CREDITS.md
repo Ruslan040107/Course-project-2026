@@ -13,11 +13,14 @@
 | AWP | SniperRifle_1 |
 | Glock-18 | Pistol_5 |
 | USP-S | Pistol_6 (+ глушитель) |
-| Desert Eagle | Pistol_3 |
+| Desert Eagle | своя модель (см. ниже) |
 | MP9 | SubmachineGun_3 |
 | Нож | Bayonet |
 
 Файлы: `Assets/Resources/WeaponModels/`.
+
+## Персонажи
+**Ultimate Modular Men Pack** — Quaternius (quaternius.com), CC0, скачано с poly.pizza. Взяты два персонажа со скелетом и 24 анимациями: Swat (CT) → `Assets/Resources/Characters/CT_Swat.fbx`, Adventurer (T) → `T_Adventurer.fbx`.
 
 ## Звуки выстрелов
 **The Free Firearm Sound Library** — Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (freefirearmsfx.com, через opengameart.org), CC0.
@@ -37,6 +40,22 @@
 
 ## Шаги, попадания, механика
 **Impact Sounds** — Kenney (kenney.nl), CC0. Файлы: `Assets/Resources/Audio/Footsteps`, `Impacts`, `Mech`.
+
+## Перезарядка, затворы, прыжки (opengameart.org, CC0)
+- `reload.wav` — «Handgun Reload Sound Effect» (магазин, затвор пистолета) → Glock-18, USP-S, Desert Eagle.
+- `assaultriflereload1_0.wav`, `gunreload1.wav` — «Gun reload sounds» (страйкбольные винтовки) → AK-47, M4A4, MP9.
+- `equipment_clicks3.wav` — «equipment clicks III» (затвор болтовой винтовки) → затвор AWP; `equipmentclicks.wav` — «Equipment Clicks II» → щелчок ножа.
+- `clipload1.wav`, `clipload2.wav` — «Gun Reload Sound Effects» (Brian MacIntosh) → магазин AWP.
+- `Jump 1-3.wav` — «Jump Landing» (Dan Knoflicek), `jumpland.wav` — «Jump Landing Sound» → прыжок и приземление.
+Нарезка и обработка: `Tools/Audio/make_reload_sounds.py`, `Tools/Audio/make_movement_sounds.py`. Файлы: `Assets/Resources/Audio/Reload/<оружие>/`, `Movement/`, `Knife/flip_*`.
+
+## Desert Eagle — своя модель
+Сделана с нуля скриптом Blender `Tools/Blender/make_deagle.py` (без сторонних ассетов): затвор (`Slide`) и магазин (`Mag`) — отдельные детали.
+
+## Иконки килфида
+- Силуэты оружия отрендерены из моделей проекта (`Tools/Icons/make_kill_icons.py`).
+- Иконка прострела нарисована нами (`Tools/Icons/make_wallbang_icon.py`).
+Файлы: `Assets/Resources/KillIcons/`.
 
 ## Свист ножа
 Синтезирован в Python (полосовой шум), свой. `Assets/Resources/Audio/Knife/`.

@@ -25,6 +25,7 @@ MonoBehaviour:
   drawTime: 0.5
   spreadAngle: 0
   recoil: 0
+  penetration: 0
   magazineSize: 0
   reserveAmmo: 0
   reloadTime: 0

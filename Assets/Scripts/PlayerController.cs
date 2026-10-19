@@ -7,6 +7,7 @@ public class PlayerController : MonoBehaviour
     public float moveSpeed = 5f;
     public float jumpHeight = 1.2f;
     public float gravity = -20f;
+    [Tooltip("not used any more: the sensitivity comes from GameSettings (Esc → Настройки)")]
     public float mouseSensitivity = 2f;
 
     [Header("Crouch")]
@@ -81,6 +82,12 @@ public class PlayerController : MonoBehaviour
     // current spread multiplier, the weapon multiplies its spreadAngle by it
     public float SpreadMultiplier => spreadNow;
 
+    void Awake()
+    {
+        // saved settings (sensitivity and the rest) before the first frame
+        GameSettings.Load();
+    }
+
     void OnEnable()
     {
         Weapon.AnyShot += OnShot;
@@ -98,8 +105,13 @@ public class PlayerController : MonoBehaviour
         shoot = GetComponent<PlayerShoot>();
         weapon = shoot != null ? shoot.weapon : GetComponentInChildren<Weapon>();
         currentHeight = standHeight;
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+
+        // the main menu keeps the cursor free while it is open
+        if (!MainMenu.IsOpen)
+        {
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
     }
 
     void OnShot(ShotInfo shot)
@@ -123,11 +135,23 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Escape))
+        // Escape and the cursor belong to MainMenu (pause menu); without it Escape frees the cursor and a click takes it back
+        if (!MainMenu.Active)
         {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+            else if (Cursor.lockState != CursorLockMode.Locked && Input.GetMouseButtonDown(0))
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
         }
+
+        // paused (a menu is open): no look, no movement, no jump queued for later
+        if (MainMenu.IsOpen || Time.timeScale <= 0f) return;
 
         if (health != null && health.IsDead) return;
 
@@ -200,9 +224,16 @@ public class PlayerController : MonoBehaviour
 
     void Look()
     {
-        float sens = mouseSensitivity * (shoot != null ? shoot.SensitivityFactor : 1f);
+        float sens = GameSettings.Sensitivity * (shoot != null ? shoot.SensitivityFactor : 1f);
         float mx = Input.GetAxis("Mouse X") * sens;
         float my = Input.GetAxis("Mouse Y") * sens;
+
+        // locking the cursor after a menu can give one big mouse jump
+        if (Time.frameCount - MainMenu.LastClosedFrame <= 1)
+        {
+            mx = 0f;
+            my = 0f;
+        }
 
         transform.Rotate(0f, mx, 0f);
         pitch = Mathf.Clamp(pitch - my, -85f, 85f);

@@ -12,21 +12,21 @@ public static class WeaponAssetsCreator
         if (!AssetDatabase.IsValidFolder("Assets/Resources")) AssetDatabase.CreateFolder("Assets", "Resources");
         if (!AssetDatabase.IsValidFolder(Folder)) AssetDatabase.CreateFolder("Assets/Resources", "Weapons");
 
-        // name, category, price, reward, damage, rate, auto, spread, recoil, mag, reserve, reload, move, draw
-        Make("Glock-18", WeaponCategory.Pistol, 200, 300, 30f, 6.7f, false, 1.0f, 0.5f, 20, 120, 2.3f, 0.96f, 0.5f);
-        Make("USP-S", WeaponCategory.Pistol, 200, 300, 35f, 5.9f, false, 0.6f, 0.6f, 12, 24, 2.2f, 0.96f, 0.5f);
-        Make("Desert Eagle", WeaponCategory.Pistol, 700, 300, 63f, 4.5f, false, 0.8f, 2.0f, 7, 35, 2.2f, 0.92f, 0.6f);
-        Make("MP9", WeaponCategory.SMG, 1250, 600, 26f, 14.3f, true, 1.2f, 0.6f, 30, 120, 2.1f, 0.96f, 0.6f);
-        Make("AK-47", WeaponCategory.Rifle, 2700, 300, 36f, 10f, true, 0.8f, 1.2f, 30, 90, 2.4f, 0.86f, 0.9f);
-        Make("M4A4", WeaponCategory.Rifle, 3100, 300, 33f, 11.1f, true, 0.7f, 0.9f, 30, 90, 3.1f, 0.90f, 0.9f);
+        // name, category, price, reward, damage, rate, auto, spread, recoil, mag, reserve, reload, move, draw, penetration
+        Make("Glock-18", WeaponCategory.Pistol, 200, 300, 30f, 6.7f, false, 1.0f, 0.5f, 20, 120, 2.3f, 0.96f, 0.5f, 0.8f);
+        Make("USP-S", WeaponCategory.Pistol, 200, 300, 35f, 5.9f, false, 0.6f, 0.6f, 12, 24, 2.2f, 0.96f, 0.5f, 1.0f);
+        Make("Desert Eagle", WeaponCategory.Pistol, 700, 300, 63f, 4.5f, false, 0.8f, 2.0f, 7, 35, 2.2f, 0.92f, 0.6f, 2.0f);
+        Make("MP9", WeaponCategory.SMG, 1250, 600, 26f, 14.3f, true, 1.2f, 0.6f, 30, 120, 2.1f, 0.96f, 0.6f, 1.0f);
+        Make("AK-47", WeaponCategory.Rifle, 2700, 300, 36f, 10f, true, 0.8f, 1.2f, 30, 90, 2.4f, 0.86f, 0.9f, 2.2f);
+        Make("M4A4", WeaponCategory.Rifle, 3100, 300, 33f, 11.1f, true, 0.7f, 0.9f, 30, 90, 3.1f, 0.90f, 0.9f, 2.0f);
 
-        WeaponData awp = Make("AWP", WeaponCategory.Sniper, 4750, 100, 115f, 0.68f, false, 0.05f, 3.0f, 5, 30, 3.7f, 0.80f, 1.2f);
+        WeaponData awp = Make("AWP", WeaponCategory.Sniper, 4750, 100, 115f, 0.68f, false, 0.05f, 3.0f, 5, 30, 3.7f, 0.80f, 1.2f, 3.5f);
         awp.scopeFov = new float[] { 40f, 10f };
         awp.unscopedSpreadMultiplier = 40f;
         awp.scopedMoveFactor = 0.5f;
         EditorUtility.SetDirty(awp);
 
-        WeaponData knife = Make("Knife", WeaponCategory.Melee, 0, 1500, 40f, 2f, true, 0f, 0f, 0, 0, 0f, 1.0f, 0.5f);
+        WeaponData knife = Make("Knife", WeaponCategory.Melee, 0, 1500, 40f, 2f, true, 0f, 0f, 0, 0, 0f, 1.0f, 0.5f, 0f);
         knife.melee = true;
         knife.meleeRange = 2f;
         knife.secondaryDamage = 65f;
@@ -41,7 +41,7 @@ public static class WeaponAssetsCreator
 
     static WeaponData Make(string name, WeaponCategory category, int price, int reward, float damage,
                            float rate, bool automatic, float spread, float recoil,
-                           int mag, int reserve, float reload, float move, float draw)
+                           int mag, int reserve, float reload, float move, float draw, float penetration)
     {
         string path = Folder + "/" + name + ".asset";
         WeaponData w = AssetDatabase.LoadAssetAtPath<WeaponData>(path);
@@ -65,6 +65,7 @@ public static class WeaponAssetsCreator
         w.drawTime = draw;
         w.spreadAngle = spread;
         w.recoil = recoil;
+        w.penetration = penetration;
         w.magazineSize = mag;
         w.reserveAmmo = reserve;
         w.reloadTime = reload;

@@ -30,9 +30,12 @@ public class Bhop : MonoBehaviour
     public bool showHud = true;
     GUIStyle style;
 
+    // GameHud draws the bhop bonus itself and sets this
+    public static bool HudDraws;
+
     void OnGUI()
     {
-        if (!showHud || !Enabled || GetComponent<PlayerController>() == null) return;
+        if (HudDraws || !showHud || !Enabled || GetComponent<PlayerController>() == null) return;
 
         Health h = GetComponent<Health>();
         if (h != null && h.IsDead) return;

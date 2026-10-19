@@ -32,6 +32,8 @@ public class WeaponData : ScriptableObject
     [Header("Accuracy")]
     [Tooltip("base spread in degrees, the player stance multiplies it")] public float spreadAngle = 1f;
     [Tooltip("camera kick multiplier")] public float recoil = 1f;
+    [Tooltip("penetration power: how much 'strength x meters' of objects a bullet can go through (see Penetrable)")]
+    public float penetration = 1.5f;
 
     [Header("Ammo")]
     public int magazineSize = 30;

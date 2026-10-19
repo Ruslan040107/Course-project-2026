@@ -196,7 +196,7 @@ public static class DesertMapBuilder
         if (player != null) player.transform.position = new Vector3(-8f, 1f, -27f);
 
         Camera overview = null;
-        foreach (Camera c in Object.FindObjectsByType<Camera>(FindObjectsSortMode.None))
+        foreach (Camera c in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include))
             if (c.name == "OverviewCamera") overview = c;
         if (overview != null) overview.transform.position = new Vector3(0f, 70f, 0f);
     }
@@ -237,7 +237,25 @@ public static class DesertMapBuilder
         go.AddComponent<MeshFilter>().sharedMesh = BoxMesh(size, tile);
         go.AddComponent<MeshRenderer>().sharedMaterial = GetMaterial(texture);
         if (collider) go.AddComponent<BoxCollider>().size = size;
+        go.AddComponent<Penetrable>().strength = PenetrationStrength(texture);
         return go;
+    }
+
+    // how hard it is to shoot through a box (see Penetrable): damage loss per meter
+    static float PenetrationStrength(string texture)
+    {
+        switch (texture)
+        {
+            case "WoodFloor043": return 0.5f;          // crates
+            case "CorrugatedSteel005": return 0.5f;    // hollow containers, thin roof
+            case "Plaster007": return 1.5f;
+            case "Concrete046": return 2.5f;
+            case "Bricks084": return 3f;
+            case "Ground079S":
+            case "PavingStones150":
+            case "Tiles143": return Penetrable.Impenetrable;   // floors
+            default: return 2f;
+        }
     }
 
     // a box of the given size whose texture repeats every "tile" meters on each face

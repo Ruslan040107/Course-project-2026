@@ -13,8 +13,10 @@ public class PlayerHud : MonoBehaviour
         health = GetComponent<Health>();
     }
 
+    // the old ammo label: only used when GameHud is not running (GameHud draws ammo, weapon name and reload bar)
     void OnGUI()
     {
+        if (GameHud.Active) return;
         if (weapon == null) return;
         if (health != null && health.IsDead) return;
 

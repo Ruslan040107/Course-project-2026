@@ -25,6 +25,7 @@ MonoBehaviour:
   drawTime: 1.2
   spreadAngle: 0.05
   recoil: 3
+  penetration: 3.5
   magazineSize: 5
   reserveAmmo: 30
   reloadTime: 3.7

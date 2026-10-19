@@ -2,14 +2,18 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // The weapon in the player's hands (first person view).
-// Every model is built at runtime from cubes and cylinders, no imported assets.
-// All animations are procedural: draw, sway, bob, recoil, reload (the magazine goes out and in),
+// The model comes from Resources/WeaponModels (or WeaponData.viewModelPrefab); without one it is
+// built at runtime from cubes and cylinders. Gloves and sleeves are boxes on movable arms.
+// All animations are procedural: draw (every weapon has its own, like in CS), sway, bob, recoil,
+// reload (the left hand takes the magazine out and in, then pulls the handle or the slide),
 // AWP bolt, pistol slide, knife slash and stab, muzzle flash and ejected shells.
 // PlayerShoot adds this component to the player camera by itself.
 public class ViewModel : MonoBehaviour
 {
     [Header("Placement (camera space)")]
-    public Vector3 hipPosition = new Vector3(0.13f, -0.15f, 0.24f);
+    public Vector3 hipPosition = new Vector3(0.13f, -0.125f, 0.275f);
+    [Tooltip("pistols are held a bit higher, so both hands are on screen")]
+    public Vector3 pistolOffset = new Vector3(-0.01f, 0.025f, 0.015f);
     public float modelScale = 0.55f;
     [Tooltip("the camera near clip plane is lowered to this, otherwise the close model is cut")]
     public float nearClip = 0.02f;
@@ -30,8 +34,51 @@ public class ViewModel : MonoBehaviour
     public int shellPool = 16;
     public float shellLifetime = 0.8f;
 
+    // sounds that belong to the player's first person animations (draw, reload):
+    // "bolt_back", "bolt_forward", "slide_back", "slide_forward", "mag_out", "mag_in", "knife_flip".
+    // GameAudio plays them without position. The weapon is the one in the hands.
+    public static event System.Action<string, WeaponData> AnimationSound;
+    static void EmitSound(string key, WeaponData weapon) { AnimationSound?.Invoke(key, weapon); }
+
     static ViewModel active;
     static Mesh cubeMesh, cylinderMesh, quadMesh;
+
+    // draw timeline (parts of WeaponData.drawTime): the weapon comes up, then the handle is pulled and released
+    const float DrawRaise = 0.38f, DrawPull = 0.52f, DrawRelease = 0.66f;
+    // reload timeline (parts of the reload time)
+    const float MagOutAt = 0.18f, MagInAt = 0.6f, PullAt = 0.8f, ReleaseAt = 0.88f;
+    // AWP bolt after a shot (parts of the time between shots)
+    const float BoltBackAt = 0.3f, BoltForwardAt = 0.5f;
+
+    // the magazine drop on reload, in the weapon root's space
+    static readonly Vector3 MagDrop = new Vector3(0f, -0.3f, 0.02f);
+    // the reload pose: the weapon turns its magazine towards the camera
+    static readonly Vector3 ReloadPos = new Vector3(-0.03f, 0.005f, 0.005f);
+    static readonly Vector3 ReloadRot = new Vector3(-8f, -15f, -28f);
+    // the knife blade points forward and up
+    static readonly Vector3 KnifeTilt = new Vector3(-35f, -10f, -25f);
+    // where the elbows are, from the palms (weapon root space)
+    static readonly Vector3 RightElbow = new Vector3(0.07f, -0.17f, -0.30f);
+    static readonly Vector3 LeftElbow = new Vector3(-0.16f, -0.2f, -0.22f);
+    static readonly Vector3 LeftElbowPistol = new Vector3(-0.1f, -0.2f, -0.22f);
+
+    // how the hands work a weapon on draw and reload
+    enum Rack
+    {
+        SideHandle,   // AK-47: the charging handle on the right side of the receiver
+        RearHandle,   // M4A4, MP9: the charging handle at the rear top
+        Bolt,         // AWP: the right hand works the bolt
+        Slide,        // pistols: the left hand racks the slide
+        Flip          // knife: a twirl on draw
+    }
+
+    // a sleeve with a glove at its end; the root sits at the elbow and looks at the palm
+    class Arm
+    {
+        public Transform root;
+        public Vector3 palm, elbow;   // rest pose, in the weapon root's space
+        public float length;
+    }
 
     class Model
     {
@@ -39,9 +86,25 @@ public class ViewModel : MonoBehaviour
         public Transform muzzle, eject, mag, slide;
         public Vector3 magRest, slideRest;
         public Vector3 magDrop = new Vector3(0f, -0.3f, 0.02f);   // where the magazine goes on reload, in its parent's space
+        public Vector3 slideBack = Vector3.back;                  // the weapon's "back" and barrel axis, in the slide's parent space
+        public Vector3 slideAxis = Vector3.forward;
         public Quaternion slideRestRot = Quaternion.identity;
         public float slideTravel;
         public bool boltAction;
+
+        // hands; all points are in the weapon root's space
+        public Rack rack;
+        public Arm leftArm, rightArm;
+        public Vector3 rightPalm, leftPalm;   // where the hands hold the weapon
+        public Vector3 handle;                // where a hand grabs the charging handle, the bolt or the slide
+        public Vector3 magGrab;               // the palm under the magazine
+        public float pull;                    // how far the hand pulls the handle back
+        public Vector3 restOffset;            // camera space
+
+        // the knife model that twirls on draw
+        public Transform spin;
+        public Vector3 spinAxis, spinRestPos;
+        public Quaternion spinRestRot;
     }
 
     class Shell
@@ -77,6 +140,18 @@ public class ViewModel : MonoBehaviour
     Vector3 kickPos, kickRot;
     Vector2 sway;
     float bobTimer, bobBlend, airOffset;
+
+    // sounds already played by the current draw, reload and bolt cycle (one bit per sound)
+    int drawCues, reloadCues = ~0, boltCues = ~0;
+
+    // the pose built this frame
+    Vector3 posePos, poseRot;          // weapon offset from the camera
+    Vector3 leftHand, rightHand;       // where the palms go
+    Vector3 leftElbowLift;             // the left elbow goes up to reach over the receiver
+    float handleBack;                  // handle, slide or bolt pulled back (0..1)
+    float boltLift;                    // AWP bolt handle lifted (0..1)
+    float magOut;                      // magazine dropped (0..1)
+    float spinAngle;                   // knife twirl
 
     // where the player's shots come out of the gun model; false when the model is hidden (scope, death)
     public static bool TryGetMuzzle(Health shooter, out Vector3 position)
@@ -126,11 +201,15 @@ public class ViewModel : MonoBehaviour
 
         active = this;
         Weapon.AnyShot += OnShot;
+        Weapon.AnyEquipped += OnEquipped;
+        if (weapon != null) weapon.ReloadStarted += OnReloadStarted;
     }
 
     void OnDestroy()
     {
         Weapon.AnyShot -= OnShot;
+        Weapon.AnyEquipped -= OnEquipped;
+        if (weapon != null) weapon.ReloadStarted -= OnReloadStarted;
         if (active == this) active = null;
         foreach (Shell s in shells)
             if (s.t != null) Destroy(s.t.gameObject);
@@ -165,11 +244,23 @@ public class ViewModel : MonoBehaviour
             boltStart = Time.time;
             boltTime = 1f / Mathf.Max(weapon.fireRate, 0.01f);
             boltEjected = false;
+            boltCues = 0;
         }
         else
         {
             EjectShell();
         }
+    }
+
+    // the same weapon taken again (a new round) is drawn again too
+    void OnEquipped(Weapon w)
+    {
+        if (w == weapon && pivot != null) SwitchTo(w.data);
+    }
+
+    void OnReloadStarted()
+    {
+        reloadCues = 0;
     }
 
     // ---------------- every frame ----------------
@@ -183,134 +274,312 @@ public class ViewModel : MonoBehaviour
 
         if (weapon != null && weapon.data != currentData) SwitchTo(weapon.data);
 
-        bool show = owner != null && !owner.IsDead && current != null
-                    && !(shoot != null && shoot.IsScoped);
+        // sounds go on even when the model is hidden (the AWP bolt in the scope)
+        bool alive = owner != null && !owner.IsDead;
+        if (alive && current != null && weapon != null) PlayCues();
+
+        bool show = alive && current != null && !(shoot != null && shoot.IsScoped);
         if (pivot.gameObject.activeSelf != show) pivot.gameObject.SetActive(show);
         if (!show) return;
 
-        Vector3 pos = hipPosition;
-        Vector3 rot = Vector3.zero;
+        posePos = hipPosition + current.restOffset;
+        poseRot = Vector3.zero;
+        leftHand = current.leftPalm;
+        rightHand = current.rightPalm;
+        leftElbowLift = Vector3.zero;
+        handleBack = 0f;
+        boltLift = 0f;
+        magOut = 0f;
+        spinAngle = 0f;
 
-        // draw: the weapon comes up from below
-        float draw = Ease(Mathf.Clamp01((Time.time - drawStart) / drawTime));
-        pos += new Vector3(0f, -0.22f, -0.05f) * (1f - draw);
-        rot += new Vector3(45f, -10f, 0f) * (1f - draw);
-
-        // sway: the weapon lags behind the mouse
-        Vector2 mouse = Cursor.lockState == CursorLockMode.Locked
-            ? new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"))
-            : Vector2.zero;
-        Vector2 swayTarget = Vector2.ClampMagnitude(new Vector2(-mouse.x, mouse.y) * swayAmount, swayMax);
-        sway = Vector2.Lerp(sway, swayTarget, 1f - Mathf.Exp(-swaySmooth * dt));
-        rot += new Vector3(sway.y, sway.x, sway.x * 0.6f);
-        pos += new Vector3(sway.x, -sway.y, 0f) * 0.002f;
-
-        // bob while walking, breathing while standing, lag while in the air
-        Vector3 vel = controller != null ? controller.velocity : Vector3.zero;
-        bool grounded = controller == null || controller.isGrounded;
-        float speed = new Vector2(vel.x, vel.z).magnitude;
-        bobBlend = Mathf.MoveTowards(bobBlend, grounded ? Mathf.Clamp01(speed / 5f) : 0f, 6f * dt);
-        bobTimer += dt * bobFrequency * bobBlend;
-        pos += new Vector3(Mathf.Cos(bobTimer) * bobAmount, Mathf.Sin(bobTimer * 2f) * bobAmount * 0.6f, 0f) * bobBlend;
-        rot.z += Mathf.Cos(bobTimer) * 1.2f * bobBlend;
-        pos.y += Mathf.Sin(Time.time * 1.6f) * 0.0015f;
-
-        float airTarget = grounded ? 0f : Mathf.Clamp(-vel.y * 0.006f, -0.03f, 0.03f);
-        airOffset = Mathf.Lerp(airOffset, airTarget, 1f - Mathf.Exp(-8f * dt));
-        pos.y += airOffset;
+        AnimateDraw((Time.time - drawStart) / drawTime);
+        Sway(dt);
 
         // recoil kick, recovers quickly
         float k = 1f - Mathf.Exp(-kickRecover * dt);
         kickPos = Vector3.Lerp(kickPos, Vector3.zero, k);
         kickRot = Vector3.Lerp(kickRot, Vector3.zero, k);
-        pos += kickPos;
-        rot += kickRot;
+        posePos += kickPos;
+        poseRot += kickRot;
         slideKick = Mathf.MoveTowards(slideKick, 0f, dt * 12f);
+        handleBack = Mathf.Max(handleBack, slideKick);
 
-        Vector3 slideOffset = Vector3.back * current.slideTravel * slideKick;
-        Quaternion slideRot = Quaternion.identity;
+        if (weapon.IsReloading && !weapon.IsMelee) AnimateReload(weapon.ReloadProgress);
 
-        // reload: tilt the weapon, the magazine drops out and comes back
-        bool reloading = weapon.IsReloading && !weapon.IsMelee;
-        float drop = 0f;
-        if (reloading)
-        {
-            float p = weapon.ReloadProgress;
-            float tilt = Window(p, 0f, 0.15f, 0.85f, 1f);
-            pos += new Vector3(-0.02f, -0.05f, 0f) * tilt;
-            rot += new Vector3(-10f, 10f, 30f) * tilt;
-
-            drop = Window(p, 0.15f, 0.35f, 0.55f, 0.75f);
-
-            // the slide or the charging handle is pulled at the end
-            float pull = Window(p, 0.78f, 0.86f, 0.88f, 0.95f);
-            slideOffset += Vector3.back * current.slideTravel * pull;
-        }
-
-        if (current.mag != null)
-        {
-            current.mag.localPosition = current.magRest + current.magDrop * drop;
-            bool magVisible = drop < 0.95f;
-            if (current.mag.gameObject.activeSelf != magVisible) current.mag.gameObject.SetActive(magVisible);
-        }
-
-        // AWP: lift the bolt handle, pull it back, push it forward, lower it
         float bt = (Time.time - boltStart) / boltTime;
-        if (current.boltAction && bt >= 0f && bt < 1f)
-        {
-            float lift = Window(bt, 0.15f, 0.3f, 0.65f, 0.8f);
-            float back = Window(bt, 0.3f, 0.42f, 0.5f, 0.65f);
-            slideRot = Quaternion.Euler(0f, 0f, 70f * lift);
-            slideOffset = Vector3.back * current.slideTravel * back;
-            rot += new Vector3(-3f, 4f, 10f) * lift;
-            pos += new Vector3(0f, -0.015f, 0f) * lift;
+        if (current.boltAction && bt >= 0f && bt < 1f) AnimateBolt(bt);
 
-            if (!boltEjected && bt > 0.42f)
-            {
-                boltEjected = true;
-                EjectShell();
-            }
-        }
+        if (weapon.IsMelee) AnimateMelee();
 
-        if (current.slide != null)
-        {
-            current.slide.localPosition = current.slideRest + slideOffset;
-            current.slide.localRotation = current.slideRestRot * slideRot;
-        }
-
-        // knife: slash with the left button, stab with the right one
-        if (weapon.IsMelee)
-        {
-            float mt = Time.time - meleeStart;
-            if (meleeStab)
-            {
-                const float dur = 0.5f;
-                if (mt < dur)
-                {
-                    float f = Window(mt / dur, 0f, 0.25f, 0.45f, 1f);
-                    pos += new Vector3(-0.06f, 0.02f, 0.14f) * f;
-                    rot += new Vector3(-8f, -15f, 0f) * f;
-                }
-            }
-            else
-            {
-                const float dur = 0.35f;
-                if (mt < dur)
-                {
-                    float u = mt / dur;
-                    float swing = Mathf.Sin(u * Mathf.PI);
-                    float side = Mathf.Lerp(35f, -55f, Ease(u));
-                    rot += new Vector3(-10f * swing, side * swing, -40f * swing);
-                    pos += new Vector3(-0.06f, 0.02f, 0.05f) * swing;
-                }
-            }
-        }
-
-        pivot.localPosition = pos;
-        pivot.localRotation = Quaternion.Euler(rot);
+        ApplyPose();
 
         bool flashOn = Time.time < flashUntil;
         if (flash.gameObject.activeSelf != flashOn) flash.gameObject.SetActive(flashOn);
+    }
+
+    // sway: the weapon lags behind the mouse; bob while walking, breathing while standing, lag while in the air
+    void Sway(float dt)
+    {
+        Vector2 mouse = Cursor.lockState == CursorLockMode.Locked
+            ? new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"))
+            : Vector2.zero;
+        Vector2 swayTarget = Vector2.ClampMagnitude(new Vector2(-mouse.x, mouse.y) * swayAmount, swayMax);
+        sway = Vector2.Lerp(sway, swayTarget, 1f - Mathf.Exp(-swaySmooth * dt));
+        poseRot += new Vector3(sway.y, sway.x, sway.x * 0.6f);
+        posePos += new Vector3(sway.x, -sway.y, 0f) * 0.002f;
+
+        Vector3 vel = controller != null ? controller.velocity : Vector3.zero;
+        bool grounded = controller == null || controller.isGrounded;
+        float speed = new Vector2(vel.x, vel.z).magnitude;
+        bobBlend = Mathf.MoveTowards(bobBlend, grounded ? Mathf.Clamp01(speed / 5f) : 0f, 6f * dt);
+        bobTimer += dt * bobFrequency * bobBlend;
+        posePos += new Vector3(Mathf.Cos(bobTimer) * bobAmount, Mathf.Sin(bobTimer * 2f) * bobAmount * 0.6f, 0f) * bobBlend;
+        poseRot.z += Mathf.Cos(bobTimer) * 1.2f * bobBlend;
+        posePos.y += Mathf.Sin(Time.time * 1.6f) * 0.0015f;
+
+        float airTarget = grounded ? 0f : Mathf.Clamp(-vel.y * 0.006f, -0.03f, 0.03f);
+        airOffset = Mathf.Lerp(airOffset, airTarget, 1f - Mathf.Exp(-8f * dt));
+        posePos.y += airOffset;
+    }
+
+    // draw: the weapon comes up from below, then the hands work it like in CS
+    void AnimateDraw(float u)
+    {
+        float raise = Ease(Mathf.Clamp01(u / DrawRaise));
+        posePos += new Vector3(0f, -0.22f, -0.05f) * (1f - raise);
+        poseRot += new Vector3(45f, -10f, 0f) * (1f - raise);
+        if (u >= 1f) return;
+
+        switch (current.rack)
+        {
+            case Rack.Flip:
+                // knife: one full turn around the blade while it comes up
+                spinAngle = 360f * Ease(Mathf.Clamp01(u / 0.85f));
+                break;
+
+            case Rack.Bolt:
+                // AWP: the right hand lifts the bolt, pulls it back, pushes it forward and lowers it
+                WorkHandle(Window(u, 0.25f, 0.4f, 0.85f, 1f), Window(u, 0.33f, 0.43f, 0.84f, 0.97f),
+                           Window(u, DrawPull, 0.6f, DrawRelease, 0.74f), 0f, Window(u, 0.42f, 0.5f, 0.76f, 0.84f));
+                break;
+
+            default:
+                // rifles, MP9, pistols: the left hand goes to the handle (slide), pulls it back and lets it go;
+                // the handle snaps forward, the hand follows a moment later
+                WorkHandle(Window(u, 0.3f, 0.45f, 0.85f, 1f), Window(u, 0.35f, 0.5f, 0.75f, 0.95f),
+                           Window(u, DrawPull, DrawPull + 0.1f, DrawRelease, DrawRelease + 0.04f),
+                           Window(u, DrawPull, DrawPull + 0.1f, DrawRelease + 0.06f, 0.9f), 0f);
+                break;
+        }
+    }
+
+    // reload: the weapon turns its magazine to the camera, the left hand takes the magazine out and puts it back,
+    // then the handle (slide, bolt) is pulled
+    void AnimateReload(float p)
+    {
+        float tilt = Window(p, 0f, 0.15f, 0.85f, 1f);
+        posePos += ReloadPos * tilt;
+        poseRot += ReloadRot * tilt;
+
+        magOut = Window(p, 0.15f, 0.35f, 0.55f, 0.75f);
+
+        // the hand holds the magazine while it drops out and comes back;
+        // a model without a separate magazine does not drop it, so the hand only dips
+        float onMag = Window(p, 0.04f, 0.15f, 0.72f, 0.8f);
+        float follow = current.mag != null ? 1f : 0.25f;
+        leftHand = Vector3.Lerp(leftHand, current.magGrab + MagDrop * magOut * follow, onMag);
+
+        // the slide or the charging handle is pulled at the end; the AWP bolt is lifted first, by the right hand
+        float back = Window(p, 0.78f, 0.86f, 0.88f, 0.95f);
+        if (current.rack == Rack.Bolt)
+            WorkHandle(Window(p, 0.66f, 0.76f, 0.92f, 1f), Window(p, 0.66f, 0.74f, 0.95f, 1f), back, 0f,
+                       Window(p, 0.74f, 0.78f, 0.95f, 0.98f));
+        else
+            WorkHandle(Window(p, 0.7f, 0.8f, 0.92f, 1f), Window(p, 0.72f, 0.8f, 0.92f, 1f), back,
+                       Window(p, 0.78f, 0.86f, 0.9f, 0.97f), 0f);
+    }
+
+    // The hands work the handle. turn: the weapon is turned to show the handle; reach: a hand is on it;
+    // back: the handle (slide, bolt) is pulled back; handBack: the hand is pulled back (0 = same as the handle);
+    // lift: the AWP bolt handle is lifted.
+    void WorkHandle(float turn, float reach, float back, float handBack, float lift)
+    {
+        Model m = current;
+        switch (m.rack)
+        {
+            case Rack.SideHandle:   // rolled to show the right side
+                posePos += new Vector3(-0.02f, 0.018f, 0f) * turn;
+                poseRot += new Vector3(-6f, -4f, 30f) * turn;
+                break;
+            case Rack.RearHandle:   // the rear of the receiver comes up a bit
+                posePos += new Vector3(-0.01f, 0.01f, -0.01f) * turn;
+                poseRot += new Vector3(-8f, -4f, 10f) * turn;
+                break;
+            case Rack.Bolt:
+                posePos += new Vector3(0f, 0.005f, 0f) * turn;
+                poseRot += new Vector3(-3f, 4f, 14f) * turn;
+                break;
+            case Rack.Slide:
+                posePos += new Vector3(-0.015f, 0.01f, 0f) * turn;
+                poseRot += new Vector3(-6f, -8f, 15f) * turn;
+                break;
+        }
+
+        handleBack = Mathf.Max(handleBack, back);
+        if (handBack <= 0f) handBack = back;
+        Vector3 onHandle = m.handle + Vector3.back * m.pull * handBack;
+
+        if (m.rack == Rack.Bolt)
+        {
+            boltLift = Mathf.Max(boltLift, lift);
+            rightHand = Vector3.Lerp(rightHand, onHandle + new Vector3(-0.03f, 0.045f, 0f) * lift, reach);
+            return;
+        }
+
+        leftHand = Vector3.Lerp(leftHand, onHandle, reach);
+        if (m.rack == Rack.SideHandle) leftElbowLift += new Vector3(0f, 0.1f, 0f) * reach;   // the arm goes over the receiver
+
+        // a pistol model without a separate slide: the whole gun jerks back a little
+        if (m.rack == Rack.Slide && m.slide == null)
+        {
+            posePos += new Vector3(0f, 0.003f, -0.008f) * back;
+            poseRot += new Vector3(-3f, 0f, 0f) * back;
+        }
+    }
+
+    // AWP after a shot: the right hand lifts the bolt handle, pulls it back, pushes it forward, lowers it
+    void AnimateBolt(float bt)
+    {
+        float lift = Window(bt, 0.15f, 0.3f, 0.65f, 0.8f);
+        float back = Window(bt, 0.3f, 0.42f, 0.5f, 0.65f);
+        float reach = Window(bt, 0f, 0.15f, 0.8f, 0.95f);
+        poseRot += new Vector3(-3f, 4f, 10f) * lift;
+        posePos += new Vector3(0f, -0.015f, 0f) * lift;
+
+        boltLift = Mathf.Max(boltLift, lift);
+        handleBack = back;
+        Vector3 onHandle = current.handle + Vector3.back * current.pull * back + new Vector3(-0.03f, 0.045f, 0f) * lift;
+        rightHand = Vector3.Lerp(rightHand, onHandle, reach);
+
+        if (!boltEjected && bt > 0.42f)
+        {
+            boltEjected = true;
+            EjectShell();
+        }
+    }
+
+    // knife: slash with the left button, stab with the right one
+    void AnimateMelee()
+    {
+        float mt = Time.time - meleeStart;
+        if (meleeStab)
+        {
+            const float dur = 0.5f;
+            if (mt < dur)
+            {
+                float f = Window(mt / dur, 0f, 0.25f, 0.45f, 1f);
+                posePos += new Vector3(-0.06f, 0.02f, 0.14f) * f;
+                poseRot += new Vector3(-8f, -15f, 0f) * f;
+            }
+        }
+        else
+        {
+            const float dur = 0.35f;
+            if (mt < dur)
+            {
+                float u = mt / dur;
+                float swing = Mathf.Sin(u * Mathf.PI);
+                float side = Mathf.Lerp(35f, -55f, Ease(u));
+                poseRot += new Vector3(-10f * swing, side * swing, -40f * swing);
+                posePos += new Vector3(-0.06f, 0.02f, 0.05f) * swing;
+            }
+        }
+    }
+
+    // moves the parts of the model to the pose built this frame
+    void ApplyPose()
+    {
+        Model m = current;
+
+        if (m.mag != null)
+        {
+            m.mag.localPosition = m.magRest + m.magDrop * magOut;
+            bool magVisible = magOut < 0.95f;
+            if (m.mag.gameObject.activeSelf != magVisible) m.mag.gameObject.SetActive(magVisible);
+        }
+
+        if (m.slide != null)
+        {
+            m.slide.localPosition = m.slideRest + m.slideBack * m.slideTravel * handleBack;
+            m.slide.localRotation = Quaternion.AngleAxis(70f * boltLift, m.slideAxis) * m.slideRestRot;
+        }
+
+        if (m.spin != null)
+        {
+            Quaternion q = Quaternion.AngleAxis(spinAngle, m.spinAxis);
+            m.spin.localPosition = q * m.spinRestPos;
+            m.spin.localRotation = q * m.spinRestRot;
+        }
+
+        if (m.leftArm != null) Reach(m.leftArm, leftHand, leftElbowLift);
+        if (m.rightArm != null) Reach(m.rightArm, rightHand, Vector3.zero);
+
+        pivot.localPosition = posePos;
+        pivot.localRotation = Quaternion.Euler(poseRot);
+    }
+
+    // sounds of the first person animations, each one once per animation
+    void PlayCues()
+    {
+        Model m = current;
+        string back = m.rack == Rack.Slide ? "slide_back" : "bolt_back";
+        string forward = m.rack == Rack.Slide ? "slide_forward" : "bolt_forward";
+
+        float u = (Time.time - drawStart) / drawTime;
+        if (u < 1.2f)
+        {
+            if (m.rack == Rack.Flip)
+            {
+                Cue(ref drawCues, 1, true, "knife_flip");
+            }
+            else
+            {
+                Cue(ref drawCues, 1, u >= DrawPull, back);
+                if (Cue(ref drawCues, 2, u >= DrawRelease, forward)) Jerk();
+            }
+        }
+
+        if (weapon.IsReloading && !weapon.IsMelee)
+        {
+            float p = weapon.ReloadProgress;
+            Cue(ref reloadCues, 1, p >= MagOutAt, "mag_out");
+            Cue(ref reloadCues, 2, p >= MagInAt, "mag_in");
+            Cue(ref reloadCues, 4, p >= PullAt, back);
+            if (Cue(ref reloadCues, 8, p >= ReleaseAt, forward)) Jerk();
+        }
+
+        float bt = (Time.time - boltStart) / boltTime;
+        if (m.boltAction && bt >= 0f && bt < 1f)
+        {
+            Cue(ref boltCues, 1, bt >= BoltBackAt, "bolt_back");
+            Cue(ref boltCues, 2, bt >= BoltForwardAt, "bolt_forward");
+        }
+    }
+
+    // plays a sound once: the bit marks it as played
+    bool Cue(ref int played, int bit, bool due, string key)
+    {
+        if (!due || (played & bit) != 0) return false;
+        played |= bit;
+        EmitSound(key, currentData);
+        return true;
+    }
+
+    // a small jerk when the handle or the slide is released
+    void Jerk()
+    {
+        kickPos += new Vector3(0f, 0.003f, -0.006f);
+        kickRot += new Vector3(-2.5f, 0f, 2f);
     }
 
     void SwitchTo(WeaponData d)
@@ -339,6 +608,11 @@ public class ViewModel : MonoBehaviour
         kickPos = Vector3.zero;
         kickRot = Vector3.zero;
         slideKick = 0f;
+
+        // a new draw; the sounds of the old weapon's reload and bolt never come
+        drawCues = 0;
+        reloadCues = ~0;
+        boltCues = ~0;
     }
 
     // ---------------- shells ----------------
@@ -388,29 +662,64 @@ public class ViewModel : MonoBehaviour
         r.localScale = Vector3.one * modelScale;
 
         string n = d.weaponName.ToLowerInvariant();
+        m.rack = RackFor(d);
+        if (!d.melee && d.category == WeaponCategory.Pistol) m.restOffset = pistolOffset;
 
         GameObject prefab = ModelFor(d);
         if (prefab != null) UsePrefab(m, r, d, prefab);
-        else if (d.melee) BuildKnife(m, r);
-        else if (d.category == WeaponCategory.Sniper || n.Contains("awp")) BuildAwp(m, r);
-        else if (n.Contains("ak")) BuildAk(m, r);
-        else if (d.category == WeaponCategory.Rifle) BuildM4(m, r);
-        else if (d.category == WeaponCategory.SMG) BuildMp9(m, r);
-        else BuildPistol(m, r, n);
+        else
+        {
+            if (d.melee) BuildKnife(m, r);
+            else if (d.category == WeaponCategory.Sniper || n.Contains("awp")) BuildAwp(m, r);
+            else if (n.Contains("ak")) BuildAk(m, r);
+            else if (d.category == WeaponCategory.Rifle) BuildM4(m, r);
+            else if (d.category == WeaponCategory.SMG) BuildMp9(m, r);
+            else BuildPistol(m, r, n);
+            BuildHands(m, r, d);
+        }
 
         if (m.muzzle == null) m.muzzle = Point(r, "Muzzle", new Vector3(0f, 0f, 0.3f));
         if (m.mag != null)
         {
             m.magRest = m.mag.localPosition;
             // the drop is "down" in the weapon's space, whatever the scale of an imported model is
-            m.magDrop = m.mag.parent.InverseTransformVector(r.TransformVector(new Vector3(0f, -0.3f, 0.02f)));
+            m.magDrop = m.mag.parent.InverseTransformVector(r.TransformVector(MagDrop));
         }
         if (m.slide != null)
         {
             m.slideRest = m.slide.localPosition;
             m.slideRestRot = m.slide.localRotation;
+            // the same for the slide: "back" and the bolt axis of the weapon in its parent's space
+            m.slideBack = m.slide.parent.InverseTransformVector(r.TransformVector(Vector3.back));
+            m.slideAxis = m.slide.parent.InverseTransformDirection(r.TransformDirection(Vector3.forward));
+        }
+        if (m.spin != null)
+        {
+            m.spinRestPos = m.spin.localPosition;
+            m.spinRestRot = m.spin.localRotation;
+            m.spinAxis = Quaternion.Euler(KnifeTilt) * Vector3.forward;   // along the blade
         }
         return m;
+    }
+
+    // the draw and reload style: by the weapon's name, else by its category
+    static Rack RackFor(WeaponData d)
+    {
+        switch (d.weaponName)
+        {
+            case "AK-47": return Rack.SideHandle;
+            case "M4A4":
+            case "MP9": return Rack.RearHandle;
+            case "AWP": return Rack.Bolt;
+            case "Glock-18":
+            case "USP-S":
+            case "Desert Eagle": return Rack.Slide;
+            case "Knife": return Rack.Flip;
+        }
+        if (d.melee || d.category == WeaponCategory.Melee) return Rack.Flip;
+        if (d.category == WeaponCategory.Sniper) return Rack.Bolt;
+        if (d.category == WeaponCategory.Pistol) return Rack.Slide;
+        return Rack.RearHandle;
     }
 
     // your own model (WeaponData.viewModelPrefab). Its children are found by name:
@@ -498,9 +807,10 @@ public class ViewModel : MonoBehaviour
         if (d.melee)
         {
             // the blade points forward and up, like the knife made of shapes
-            Quaternion tilt = Quaternion.Euler(-35f, -10f, -25f);
+            Quaternion tilt = Quaternion.Euler(KnifeTilt);
             t.localPosition = tilt * t.localPosition;
             t.localRotation = tilt * t.localRotation;
+            m.spin = t;
         }
         else if (m.muzzle != null)
         {
@@ -509,39 +819,164 @@ public class ViewModel : MonoBehaviour
             t.localPosition += new Vector3(0f, 0.03f - mz.y, 0f);
         }
 
-        if (FindChild(t, "Hands") == null) ModelHands(m, r, d, FindChild(t, "Grip"));
+        if (FindChild(t, "Hands") == null)
+        {
+            ModelGrips(m, r, d, FindChild(t, "Grip"));
+            BuildHands(m, r, d);
+        }
     }
 
-    // simple gloves and sleeves for a model without hands
-    void ModelHands(Model m, Transform r, WeaponData d, Transform grip)
+    // Where the hands hold an imported model. The Grip, the Muzzle and the Mag or Slide parts are found in the model,
+    // the rest was measured on the models in Resources/WeaponModels: x right, y up, z forward, meters from the Grip.
+    void ModelGrips(Model m, Transform r, WeaponData d, Transform grip)
     {
-        Material glove = Glove(), sleeve = Sleeve();
         Vector3 g = grip != null ? r.InverseTransformPoint(grip.position) : Vector3.zero;
+        m.rightPalm = g;
+        if (m.rack == Rack.Flip) return;
 
-        if (d.melee)
+        Vector3 mz = m.muzzle != null ? r.InverseTransformPoint(m.muzzle.position) : g + new Vector3(0f, 0.08f, 0.5f);
+        float high = mz.y - g.y;       // the barrel above the grip
+        float length = mz.z - g.z;     // the muzzle in front of the grip
+
+        Vector3 right = new Vector3(0.004f, 0.008f, 0f);
+        Vector3 left, handle, mag;
+        float pull;
+        switch (d.weaponName)
         {
-            Box(r, g, new Vector3(0.055f, 0.06f, 0.09f), glove, new Vector3(-35f, -10f, -25f));
-            Box(r, g + new Vector3(0.03f, -0.1f, -0.17f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-30f, -8f, 0f));
+            case "AK-47":
+                left = new Vector3(-0.006f, 0.05f, 0.33f);
+                handle = new Vector3(0.035f, 0.115f, 0.17f);
+                mag = new Vector3(0f, -0.145f, 0.235f);
+                pull = 0.07f;
+                break;
+            case "M4A4":
+                left = new Vector3(-0.006f, 0.04f, 0.31f);
+                handle = new Vector3(0f, 0.13f, -0.005f);
+                mag = new Vector3(0f, -0.155f, 0.175f);
+                pull = 0.05f;
+                break;
+            case "MP9":
+                left = new Vector3(-0.004f, 0.025f, 0.19f);   // on the vertical front grip
+                handle = new Vector3(0f, 0.13f, -0.03f);
+                mag = new Vector3(0f, -0.095f, 0.08f);
+                pull = 0.04f;
+                break;
+            case "AWP":
+                right = new Vector3(0.004f, 0.02f, -0.065f);   // the grip of the stock is behind the trigger
+                left = new Vector3(-0.006f, 0.025f, 0.3f);
+                handle = new Vector3(0.035f, 0.095f, -0.01f);   // the bolt handle
+                mag = new Vector3(0f, 0f, 0.06f);
+                pull = 0.07f;
+                break;
+            default:
+                if (m.rack == Rack.Slide)
+                {
+                    // a pistol: the left hand holds the right one, the rear of the slide is above the grip
+                    right = new Vector3(0.006f, 0.005f, -0.005f);
+                    left = new Vector3(-0.03f, -0.012f, 0.012f);
+                    handle = new Vector3(0f, high, -0.02f);
+                    mag = new Vector3(0f, -0.075f, -0.012f);
+                    pull = 0.03f;
+                }
+                else
+                {
+                    // another long gun: the left hand under the handguard, the handle on top above the grip
+                    left = new Vector3(-0.006f, high * 0.45f, length * 0.5f);
+                    handle = new Vector3(0f, high + 0.035f, 0f);
+                    mag = new Vector3(0f, -0.15f, length * 0.28f);
+                    pull = 0.05f;
+                }
+                break;
+        }
+
+        m.rightPalm = g + right;
+        m.leftPalm = g + left;
+        m.handle = g + handle;
+        m.magGrab = g + mag;
+        m.pull = pull;
+
+        // separate parts tell exactly where the magazine bottom and the rear of the slide are
+        if (m.mag != null && TryBoundsIn(m.mag, r, out Bounds mb))
+            m.magGrab = new Vector3(mb.center.x, mb.min.y - 0.022f, mb.center.z);
+        if (m.slide != null && m.rack == Rack.Slide && TryBoundsIn(m.slide, r, out Bounds sb))
+        {
+            m.handle = new Vector3(sb.center.x, sb.center.y, sb.min.z + 0.02f);
+            m.pull = m.slideTravel;
+        }
+    }
+
+    // the box around the meshes of a part, in the space of another transform
+    static bool TryBoundsIn(Transform part, Transform space, out Bounds bounds)
+    {
+        bounds = new Bounds();
+        bool any = false;
+        foreach (MeshFilter mf in part.GetComponentsInChildren<MeshFilter>(true))
+        {
+            if (mf.sharedMesh == null) continue;
+            Bounds mb = mf.sharedMesh.bounds;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 corner = mb.center + Vector3.Scale(mb.extents,
+                    new Vector3((i & 1) == 0 ? -1f : 1f, (i & 2) == 0 ? -1f : 1f, (i & 4) == 0 ? -1f : 1f));
+                Vector3 p = space.InverseTransformPoint(mf.transform.TransformPoint(corner));
+                if (any) bounds.Encapsulate(p);
+                else bounds = new Bounds(p, Vector3.zero);
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    // Gloves and sleeves on arms that can move, so a hand can reach the handle, the slide or the magazine.
+    // The right hand holds the grip, the left one holds the handguard (or the right hand on a pistol).
+    void BuildHands(Model m, Transform r, WeaponData d)
+    {
+        if (m.rack == Rack.Flip)
+        {
+            m.rightArm = BuildArm(r, m.rightPalm, RightElbow, new Vector3(0.055f, 0.06f, 0.09f), KnifeTilt, Vector3.zero, Vector3.zero);
             return;
         }
 
-        // right hand around the grip, the forearm goes back towards the camera
-        Box(r, g + new Vector3(0.004f, 0f, 0f), new Vector3(0.05f, 0.07f, 0.075f), glove, new Vector3(15f, 0f, 0f));
-        Box(r, g + new Vector3(0.03f, -0.07f, -0.17f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-25f, -8f, 0f));
+        m.rightArm = BuildArm(r, m.rightPalm, RightElbow, new Vector3(0.05f, 0.08f, 0.075f), new Vector3(15f, 0f, 0f),
+                              new Vector3(-0.026f, 0.03f, 0.012f), new Vector3(0.014f, 0.018f, 0.05f));
 
         if (d.category == WeaponCategory.Pistol)
-        {
-            // left hand holds the right one from below
-            Box(r, g + new Vector3(-0.03f, -0.01f, 0.005f), new Vector3(0.05f, 0.065f, 0.08f), glove, new Vector3(15f, 0f, -20f));
-            Box(r, g + new Vector3(-0.11f, -0.07f, -0.15f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-20f, 35f, 0f));
-            return;
-        }
+            m.leftArm = BuildArm(r, m.leftPalm, LeftElbowPistol, new Vector3(0.045f, 0.065f, 0.075f), new Vector3(15f, 10f, -15f),
+                                 Vector3.zero, Vector3.zero);
+        else if (d.category == WeaponCategory.SMG)   // the hand around a vertical front grip
+            m.leftArm = BuildArm(r, m.leftPalm, LeftElbow, new Vector3(0.05f, 0.075f, 0.055f), new Vector3(-8f, 0f, 0f),
+                                 new Vector3(-0.026f, 0.03f, -0.01f), new Vector3(0.014f, 0.018f, 0.04f));
+        else                                          // the palm under the handguard, the thumb along its side
+            m.leftArm = BuildArm(r, m.leftPalm, LeftElbow, new Vector3(0.06f, 0.045f, 0.1f), Vector3.zero,
+                                 new Vector3(-0.031f, 0.022f, 0f), new Vector3(0.016f, 0.022f, 0.07f));
+    }
 
-        // left hand under the handguard, half way to the muzzle
-        Vector3 mz = m.muzzle != null ? r.InverseTransformPoint(m.muzzle.position) : new Vector3(0f, 0.03f, 0.4f);
-        Vector3 fore = new Vector3(-0.005f, Mathf.Lerp(g.y, mz.y, 0.5f) - 0.035f, Mathf.Lerp(g.z, mz.z, 0.45f));
-        Box(r, fore, new Vector3(0.06f, 0.05f, 0.1f), glove);
-        Box(r, fore + new Vector3(-0.085f, -0.08f, -0.15f), new Vector3(0.075f, 0.075f, 0.32f), sleeve, new Vector3(-20f, 30f, 0f));
+    // a sleeve from the elbow to the wrist and a glove (with a thumb) on the palm
+    Arm BuildArm(Transform r, Vector3 palm, Vector3 elbowOffset, Vector3 handSize, Vector3 handEuler, Vector3 thumbPos, Vector3 thumbSize)
+    {
+        Arm a = new Arm { palm = palm, elbow = palm + elbowOffset, length = elbowOffset.magnitude };
+        a.root = Point(r, "Arm", a.elbow);
+        a.root.localRotation = Quaternion.LookRotation(palm - a.elbow, Vector3.up);
+
+        // the sleeve goes on a bit behind the elbow, off the screen
+        float behind = 0.12f, wrist = a.length - handSize.z * 0.45f;
+        Box(a.root, new Vector3(0f, 0f, (wrist - behind) * 0.5f), new Vector3(0.07f, 0.07f, wrist + behind), Sleeve());
+
+        // in the rest pose the hand has its own angle to the weapon
+        Transform hand = Point(a.root, "Hand", new Vector3(0f, 0f, a.length));
+        hand.localRotation = Quaternion.Inverse(a.root.localRotation) * Quaternion.Euler(handEuler);
+        Box(hand, Vector3.zero, handSize, Glove());
+        if (thumbSize != Vector3.zero) Box(hand, thumbPos, thumbSize, Glove());
+        return a;
+    }
+
+    // puts the palm at a point (weapon root space): the elbow follows half way (plus a lift), the forearm keeps its length
+    static void Reach(Arm a, Vector3 palm, Vector3 elbowLift)
+    {
+        Vector3 elbow = a.elbow + (palm - a.palm) * 0.5f + elbowLift;
+        Vector3 dir = (palm - elbow).normalized;
+        a.root.localPosition = palm - dir * a.length;
+        a.root.localRotation = Quaternion.LookRotation(dir, Vector3.up);
     }
 
     public static Transform FindChild(Transform root, string name)
@@ -555,7 +990,7 @@ public class ViewModel : MonoBehaviour
     Material Polymer() { return Mat("Polymer", new Color(0.06f, 0.06f, 0.07f), 0f, 0.3f); }
     Material Wood() { return Mat("Wood", new Color(0.42f, 0.22f, 0.1f), 0f, 0.35f); }
     Material Silver() { return Mat("Silver", new Color(0.72f, 0.72f, 0.75f), 1f, 0.75f); }
-    Material Glove() { return Mat("Glove", new Color(0.36f, 0.27f, 0.18f), 0f, 0.25f); }
+    Material Glove() { return Mat("Glove", new Color(0.5f, 0.4f, 0.28f), 0f, 0.25f); }
     Material Sleeve() { return Mat("Sleeve", new Color(0.34f, 0.37f, 0.26f), 0f, 0.15f); }
 
     void BuildAk(Model m, Transform r)
@@ -580,7 +1015,12 @@ public class ViewModel : MonoBehaviour
         m.slideTravel = 0.06f;
         m.muzzle = Point(r, "Muzzle", new Vector3(0f, 0.02f, 0.68f));
         m.eject = Point(r, "Eject", new Vector3(0.03f, 0.03f, 0.08f));
-        RifleHands(r, -0.04f, 0.33f);
+
+        m.rightPalm = new Vector3(0.005f, -0.07f, -0.04f);
+        m.leftPalm = new Vector3(-0.006f, -0.045f, 0.33f);
+        m.handle = new Vector3(0.045f, 0.02f, 0.12f);
+        m.magGrab = new Vector3(0f, -0.22f, 0.14f);
+        m.pull = m.slideTravel;
     }
 
     void BuildM4(Model m, Transform r)
@@ -604,7 +1044,12 @@ public class ViewModel : MonoBehaviour
         m.slideTravel = 0.05f;
         m.muzzle = Point(r, "Muzzle", new Vector3(0f, 0.01f, 0.64f));
         m.eject = Point(r, "Eject", new Vector3(0.03f, 0.03f, 0.06f));
-        RifleHands(r, -0.03f, 0.3f);
+
+        m.rightPalm = new Vector3(0.005f, -0.07f, -0.03f);
+        m.leftPalm = new Vector3(-0.006f, -0.035f, 0.3f);
+        m.handle = new Vector3(0f, 0.06f, -0.1f);
+        m.magGrab = new Vector3(0f, -0.19f, 0.1f);
+        m.pull = m.slideTravel;
     }
 
     void BuildAwp(Model m, Transform r)
@@ -635,7 +1080,12 @@ public class ViewModel : MonoBehaviour
 
         m.muzzle = Point(r, "Muzzle", new Vector3(0f, 0.015f, 0.85f));
         m.eject = Point(r, "Eject", new Vector3(0.035f, 0.03f, 0f));
-        RifleHands(r, -0.1f, 0.3f);
+
+        m.rightPalm = new Vector3(0.005f, -0.07f, -0.1f);
+        m.leftPalm = new Vector3(-0.006f, -0.05f, 0.3f);
+        m.handle = new Vector3(0.1f, 0.03f, -0.04f);   // the bolt knob
+        m.magGrab = new Vector3(0f, -0.125f, 0.05f);
+        m.pull = m.slideTravel;
     }
 
     void BuildMp9(Model m, Transform r)
@@ -656,7 +1106,12 @@ public class ViewModel : MonoBehaviour
         m.slideTravel = 0.04f;
         m.muzzle = Point(r, "Muzzle", new Vector3(0f, 0.02f, 0.27f));
         m.eject = Point(r, "Eject", new Vector3(0.03f, 0.03f, 0.05f));
-        RifleHands(r, -0.02f, 0.13f);
+
+        m.rightPalm = new Vector3(0.005f, -0.06f, -0.02f);
+        m.leftPalm = new Vector3(-0.004f, -0.055f, 0.13f);   // on the front grip
+        m.handle = new Vector3(0f, 0.07f, -0.08f);
+        m.magGrab = new Vector3(0f, -0.195f, -0.03f);
+        m.pull = m.slideTravel;
     }
 
     void BuildPistol(Model m, Transform r, string n)
@@ -692,45 +1147,27 @@ public class ViewModel : MonoBehaviour
             m.muzzle = Point(r, "Muzzle", new Vector3(0f, 0.035f, 0.16f) * s);
         }
         m.eject = Point(r, "Eject", new Vector3(0.02f, 0.05f, 0.04f) * s);
-        PistolHands(r);
-    }
 
-    void PistolHands(Transform r)
-    {
-        Material glove = Glove(), sleeve = Sleeve();
-        Box(r, new Vector3(0.005f, -0.06f, -0.02f), new Vector3(0.05f, 0.07f, 0.08f), glove, new Vector3(14f, 0f, 0f));
-        Box(r, new Vector3(0.03f, -0.13f, -0.19f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-25f, -8f, 0f));
-        Box(r, new Vector3(-0.03f, -0.07f, -0.005f), new Vector3(0.05f, 0.065f, 0.08f), glove, new Vector3(15f, 0f, -20f));
-        Box(r, new Vector3(-0.11f, -0.13f, -0.15f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-20f, 35f, 0f));
+        m.rightPalm = new Vector3(0.006f, -0.05f, -0.015f) * s;
+        m.leftPalm = new Vector3(-0.03f, -0.06f, 0f) * s;
+        m.handle = new Vector3(0f, 0.04f, -0.02f) * s;   // the rear of the slide
+        m.magGrab = new Vector3(0f, -0.135f, -0.02f) * s;
+        m.pull = m.slideTravel;
     }
 
     void BuildKnife(Model m, Transform r)
     {
         Transform k = Point(r, "Knife", Vector3.zero);
-        k.localRotation = Quaternion.Euler(-35f, -10f, -25f);   // the blade points forward and up
+        k.localRotation = Quaternion.Euler(KnifeTilt);   // the blade points forward and up
 
         Box(k, Vector3.zero, new Vector3(0.028f, 0.032f, 0.11f), Polymer());                    // handle
         Box(k, new Vector3(0f, 0f, 0.06f), new Vector3(0.03f, 0.05f, 0.01f), Metal());          // guard
         Box(k, new Vector3(0f, 0.004f, 0.15f), new Vector3(0.005f, 0.03f, 0.17f), Silver());    // blade
         Box(k, new Vector3(0f, 0f, 0.24f), new Vector3(0.005f, 0.02f, 0.03f), Silver(), new Vector3(35f, 0f, 0f));  // tip
 
-        Box(k, new Vector3(0f, -0.005f, -0.005f), new Vector3(0.055f, 0.06f, 0.09f), Glove());
-        Box(r, new Vector3(0.03f, -0.1f, -0.17f), new Vector3(0.075f, 0.075f, 0.3f), Sleeve(), new Vector3(-30f, -8f, 0f));
-
         m.muzzle = Point(k, "Muzzle", new Vector3(0f, 0f, 0.25f));
-    }
-
-    void RifleHands(Transform r, float gripZ, float foreZ)
-    {
-        Material glove = Glove(), sleeve = Sleeve();
-
-        // right hand on the grip, the forearm goes back towards the camera
-        Box(r, new Vector3(0.005f, -0.075f, gripZ), new Vector3(0.055f, 0.07f, 0.085f), glove, new Vector3(15f, 0f, 0f));
-        Box(r, new Vector3(0.03f, -0.14f, gripZ - 0.17f), new Vector3(0.075f, 0.075f, 0.3f), sleeve, new Vector3(-25f, -8f, 0f));
-
-        // left hand under the handguard
-        Box(r, new Vector3(-0.005f, -0.04f, foreZ), new Vector3(0.06f, 0.05f, 0.1f), glove);
-        Box(r, new Vector3(-0.09f, -0.12f, foreZ - 0.15f), new Vector3(0.075f, 0.075f, 0.32f), sleeve, new Vector3(-20f, 30f, 0f));
+        m.spin = k;
+        m.rightPalm = k.localRotation * new Vector3(0f, -0.005f, -0.005f);
     }
 
     // ---------------- muzzle flash ----------------

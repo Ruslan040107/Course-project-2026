@@ -16,6 +16,8 @@ public class BotController : MonoBehaviour
     public float alertTime = 2f;
     [Tooltip("bots with a sniper rifle do not scope closer than this")] public float noScopeDistance = 8f;
     float alertUntil;
+    // heard a noise or was hit by an enemy a moment ago: looks all around, not only in its field of view
+    public bool IsAlerted => Time.time < alertUntil;
 
     [Header("Melee")]
     [Tooltip("a bot with a knife walks up to this distance")] public float meleeStopDistance = 1.3f;
@@ -36,6 +38,14 @@ public class BotController : MonoBehaviour
     bool runDecided;         // already decided whether to hop on this run
     float nextChainAt;
 
+    [Header("Sneak (Shift)")]
+    [Tooltip("speed while sneaking, like the player's Shift")] public float sneakSpeedFactor = 0.5f;
+    [Tooltip("a bot may sneak when the place it checks is closer than this (or when it is alerted)")] public float sneakDistance = 25f;
+    [Tooltip("chance to sneak, decided once each time the bot goes to check an enemy")] [Range(0f, 1f)] public float sneakChance = 0.6f;
+    // walks at sneakSpeedFactor without footsteps (GameAudio) and does not hop
+    public bool IsSneaking { get; private set; }
+    bool sneakDecided;       // already decided whether to sneak on this approach
+
     NavMeshAgent agent;
     MapBounds bounds;
     Health self;
@@ -47,6 +57,13 @@ public class BotController : MonoBehaviour
     float seenTime;
     float baseSpeed;
 
+    // a bot sees a part of the body, not only its centre: over low cover only the head shows,
+    // at a corner only a shoulder. It aims at the part it sees.
+    const float HeadBelowTop = 0.25f;     // head point, meters below the top of the body
+    const float ShoulderOffset = 0.3f;    // shoulder points, meters to the side of the line of sight
+    readonly Vector3[] bodyPoints = new Vector3[5];
+    Vector3 enemyPoint;                   // the visible point of the enemy found this step
+
     void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
@@ -55,12 +72,6 @@ public class BotController : MonoBehaviour
         baseSpeed = agent.speed;
         baseOffset = agent.baseOffset;
         bounds = FindAnyObjectByType<MapBounds>();
-    }
-
-    Vector3 AimPoint(Health t)
-    {
-        Collider c = t.GetComponent<Collider>();
-        return c != null ? c.bounds.center : t.transform.position;
     }
 
     void OnEnable()
@@ -73,6 +84,8 @@ public class BotController : MonoBehaviour
         hopsLeft = 0;
         runDecided = false;
         nextChainAt = 0f;
+        IsSneaking = false;
+        sneakDecided = false;
         agent.baseOffset = baseOffset;
         self.Damaged += OnDamaged;
     }
@@ -80,6 +93,7 @@ public class BotController : MonoBehaviour
     void OnDisable()
     {
         self.Damaged -= OnDamaged;
+        IsSneaking = false;
     }
 
     // a noise (the player's steps or shots, see GameAudio): bots of the other team within the radius hear it
@@ -119,12 +133,20 @@ public class BotController : MonoBehaviour
     {
         if (stealth == null) stealth = GetComponent<Stealth>();
         if (bhop == null) bhop = GetComponent<Bhop>();
-        float bhopFactor = bhop != null ? bhop.SpeedMultiplier : 1f;
-        float weaponFactor = weapon != null ? weapon.moveSpeedFactor : 1f;
-        agent.speed = (stealth != null ? baseSpeed * weaponFactor * stealth.SpeedFactor() : baseSpeed * weaponFactor) * bhopFactor;
+
+        // no scope while the weapon is still being drawn
+        if (weapon != null && weapon.IsDrawing) weapon.Scoped = false;
 
         bool wantHop = false;
         Health enemy = FindVisibleEnemy();
+        bool checking = hasLastKnown && Time.time - lastSeenAt < memoryTime;
+        bool alerted = Time.time < alertUntil;
+        UpdateSneak(enemy == null && checking, alerted);
+
+        float bhopFactor = bhop != null ? bhop.SpeedMultiplier : 1f;
+        float weaponFactor = weapon != null ? weapon.moveSpeedFactor : 1f;
+        float sneakFactor = IsSneaking ? sneakSpeedFactor : 1f;
+        agent.speed = (stealth != null ? baseSpeed * weaponFactor * stealth.SpeedFactor() : baseSpeed * weaponFactor) * bhopFactor * sneakFactor;
 
         if (enemy != null)
         {
@@ -151,12 +173,13 @@ public class BotController : MonoBehaviour
 
             if (seenTime >= reactionTime)
             {
-                head.LookAt(AimPoint(enemy));
-                weapon.Scoped = distance > noScopeDistance;
+                head.LookAt(enemyPoint);
+                // like the player, a bot cannot scope or shoot until its weapon is drawn
+                weapon.Scoped = !weapon.IsDrawing && distance > noScopeDistance;
                 float speedRatio = agent.velocity.magnitude / Mathf.Max(baseSpeed, 0.01f);
                 weapon.ExternalMoveInaccuracy = hopTime >= 0f ? 1.5f : Mathf.Clamp01(Mathf.InverseLerp(0.25f, 0.8f, speedRatio));
 
-                if (!weapon.IsMelee || distance <= weapon.data.meleeRange)
+                if (!weapon.IsDrawing && (!weapon.IsMelee || distance <= weapon.data.meleeRange))
                     weapon.TryFire();
             }
         }
@@ -166,15 +189,15 @@ public class BotController : MonoBehaviour
             seenTime = 0f;
             if (weapon.Ammo < weapon.magazineSize) weapon.StartReload();
 
-            if (hasLastKnown && Time.time - lastSeenAt < memoryTime)
+            if (checking)
                 agent.SetDestination(lastKnown);
             else
                 Wander();
 
             Face(agent.desiredVelocity);
 
-            bool alerted = Time.time < alertUntil;
-            bool longRun = !alerted && agent.hasPath && !agent.pathPending
+            // a sneaking bot walks, it does not hop
+            bool longRun = !alerted && !IsSneaking && agent.hasPath && !agent.pathPending
                            && agent.remainingDistance > hopMinDistance
                            && Vector3.Distance(transform.position, agent.steeringTarget) > hopMinStraight;
             wantHop = WantHop(longRun);
@@ -184,6 +207,24 @@ public class BotController : MonoBehaviour
         if (enemy != null && hopsLeft > 0) EndChain();
 
         UpdateBhop(wantHop);
+    }
+
+    // like the player with Shift: a bot that goes to check where it last saw or heard an enemy
+    // (close to that place, or just alerted) may sneak there at half speed and without footsteps.
+    // It decides once per approach; seeing an enemy or forgetting him ends the sneak.
+    void UpdateSneak(bool checking, bool alerted)
+    {
+        bool near = (lastKnown - transform.position).sqrMagnitude < sneakDistance * sneakDistance;
+        if (!checking || !(near || alerted))
+        {
+            IsSneaking = false;
+            sneakDecided = false;
+            return;
+        }
+
+        if (sneakDecided) return;
+        sneakDecided = true;
+        IsSneaking = Random.value < sneakChance;
     }
 
     // a bot does not hop all the time: only on some long straight runs, a few jumps, then a pause
@@ -280,32 +321,41 @@ public class BotController : MonoBehaviour
         transform.rotation = Quaternion.Slerp(transform.rotation, look, turnSpeed * Time.fixedDeltaTime);
     }
 
+    // the enemy the bot sees; enemyPoint gets the point of his body the bot sees
     Health FindVisibleEnemy()
     {
-        if (target != null && !target.IsDead && target.gameObject.activeInHierarchy && CanSee(target))
+        if (target != null && !target.IsDead && target.gameObject.activeInHierarchy && CanSee(target, out enemyPoint))
             return target;
 
         Health best = null;
         float bestDistance = float.MaxValue;
+        Vector3 bestPoint = Vector3.zero;
 
         foreach (Health h in Health.All)
         {
             if (h == self || h.team == self.team || h.IsDead || !h.gameObject.activeInHierarchy) continue;
 
             float d = (h.transform.position - transform.position).sqrMagnitude;
-            if (d < bestDistance && CanSee(h))
+            if (d < bestDistance && CanSee(h, out Vector3 point))
             {
                 bestDistance = d;
                 best = h;
+                bestPoint = point;
             }
         }
+        enemyPoint = bestPoint;
         return best;
     }
 
-    bool CanSee(Health t)
+    bool CanSee(Health t, out Vector3 point)
     {
         Vector3 from = head.position;
-        Vector3 toTarget = AimPoint(t) - from;
+        Collider c = t.GetComponent<Collider>();
+        Bounds b = c != null ? c.bounds : new Bounds(t.transform.position, Vector3.zero);
+
+        // distance and field of view are measured to the centre of the body, as before
+        point = b.center;
+        Vector3 toTarget = b.center - from;
         float distance = toTarget.magnitude;
         if (distance < 0.01f) return true;
 
@@ -319,9 +369,42 @@ public class BotController : MonoBehaviour
         bool alerted = Time.time < alertUntil;
         if (!alerted && flat.sqrMagnitude > 0.0001f && Vector3.Angle(transform.forward, flat) > fieldOfView * 0.5f)
             return false;
-        if (Physics.Raycast(from, toTarget / distance, out RaycastHit hit, radius))
-            return hit.collider.GetComponentInParent<Health>() == t;
 
+        // the target is seen if any point of his body has a clear line, the first clear point is where the bot aims
+        int count = BodyPoints(b, flat);
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 dir = bodyPoints[i] - from;
+            float d = dir.magnitude;
+            if (d < 0.01f) continue;
+
+            if (Physics.Raycast(from, dir / d, out RaycastHit hit, radius) && hit.collider.GetComponentInParent<Health>() == t)
+            {
+                point = bodyPoints[i];
+                return true;
+            }
+        }
         return false;
+    }
+
+    // points of the body to look at, best for aiming first: centre, upper chest, head, then the shoulders.
+    // They come from the collider, so a crouching player (smaller collider) has them lower.
+    int BodyPoints(Bounds b, Vector3 flatToTarget)
+    {
+        Vector3 centre = b.center;
+        Vector3 headPoint = new Vector3(centre.x, Mathf.Max(centre.y, b.max.y - HeadBelowTop), centre.z);
+        Vector3 chest = Vector3.Lerp(centre, headPoint, 0.5f);
+
+        bodyPoints[0] = centre;
+        bodyPoints[1] = chest;
+        bodyPoints[2] = headPoint;
+        if (flatToTarget.sqrMagnitude < 0.0001f) return 3;
+
+        // to the left and right of the line of sight, still inside the body
+        float sideways = Mathf.Min(ShoulderOffset, Mathf.Min(b.extents.x, b.extents.z) * 0.8f);
+        Vector3 side = Vector3.Cross(Vector3.up, flatToTarget).normalized * sideways;
+        bodyPoints[3] = chest + side;
+        bodyPoints[4] = chest - side;
+        return 5;
     }
 }

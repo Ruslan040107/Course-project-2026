@@ -4,7 +4,9 @@ public class PlayerShoot : MonoBehaviour
 {
     public Weapon weapon;
     public float zoomSpeed = 14f;
-    public GameObject crosshair;   // if empty, taken from the Spectator component
+    // the old canvas crosshair (if empty, taken from the Spectator component); GameHud draws its own crosshair
+    // and keeps this one hidden, it is shown only when GameHud does not run
+    public GameObject crosshair;
 
     Health health;
     PlayerController pcRef;
@@ -51,11 +53,27 @@ public class PlayerShoot : MonoBehaviour
     void OnEnable()
     {
         Weapon.AnyShot += OnShot;
+        GameSettings.Changed += ApplySettingsFov;
     }
 
     void OnDisable()
     {
         Weapon.AnyShot -= OnShot;
+        GameSettings.Changed -= ApplySettingsFov;
+    }
+
+    // the normal (not zoomed) field of view comes from the settings; the scope zooms relative to it
+    void ApplySettingsFov()
+    {
+        baseFov = Mathf.Clamp(GameSettings.VerticalFov, 20f, 140f);
+        if (cam == null) return;
+
+        // not zoomed: change at once, so the settings screen shows it even while the game is paused
+        if (zoomLevel == 0)
+        {
+            currentFov = baseFov;
+            cam.fieldOfView = currentFov;
+        }
     }
 
     void OnShot(ShotInfo s)
@@ -82,8 +100,10 @@ public class PlayerShoot : MonoBehaviour
 
         if (cam != null)
         {
-            baseFov = cam.fieldOfView;
+            GameSettings.Load();   // does nothing if the settings are already loaded
+            ApplySettingsFov();
             currentFov = baseFov;
+            cam.fieldOfView = currentFov;
 
             // the weapon model in the hands
             ViewModel vm = cam.GetComponent<ViewModel>();
@@ -99,8 +119,19 @@ public class PlayerShoot : MonoBehaviour
         bool dead = health != null && health.IsDead;
         int levels = ScopeLevels();
 
-        // sniper rifles have no crosshair, only the scope
-        if (!dead && crosshair != null) crosshair.SetActive(levels == 0);
+        // GameHud draws the crosshair (none for sniper rifles, only the scope): the canvas image stays hidden;
+        // without GameHud the old image is used as before
+        if (crosshair != null)
+        {
+            if (GameHud.Active)
+            {
+                if (crosshair.activeSelf) crosshair.SetActive(false);
+            }
+            else if (!dead)
+            {
+                crosshair.SetActive(levels == 0);
+            }
+        }
 
         if (weapon.data != lastData)
         {
@@ -108,9 +139,11 @@ public class PlayerShoot : MonoBehaviour
             ResetZoom();
         }
 
-        if (dead || levels == 0 || weapon.IsReloading) ResetZoom();
+        // no scope while the weapon is being drawn or reloaded: right click does nothing then
+        bool busy = weapon.IsDrawing || weapon.IsReloading;
+        if (dead || levels == 0 || busy) ResetZoom();
 
-        if (!dead && levels > 0 && Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButtonDown(1))
+        if (!dead && !busy && levels > 0 && Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButtonDown(1))
             desiredZoom = (desiredZoom + 1) % (levels + 1);
 
         zoomLevel = Time.time < boltUntil ? 0 : desiredZoom;
@@ -121,6 +154,8 @@ public class PlayerShoot : MonoBehaviour
 
         if (dead) return;
         if (Cursor.lockState != CursorLockMode.Locked) return;
+        // the click that took the cursor back (or closed a menu) is not a shot
+        if (Time.frameCount - MainMenu.LastClosedFrame <= 1) return;
 
         if (Input.GetKeyDown(KeyCode.R)) weapon.StartReload();
 
@@ -152,6 +187,7 @@ public class PlayerShoot : MonoBehaviour
     void OnGUI()
     {
         if (zoomLevel == 0 || currentFov > baseFov - 8f) return;
+        if (weapon == null || weapon.IsDrawing) return;
 
         if (scopeTexture == null) scopeTexture = MakeScopeTexture();
 

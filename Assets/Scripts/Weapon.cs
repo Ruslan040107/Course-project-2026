@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public struct ShotInfo
@@ -8,16 +9,28 @@ public struct ShotInfo
     public bool hit;
     public bool headshot;
     public Health shooter;
-    public Health target;
+    public Health target;   // the first player hit (a bullet can go on through him, see Weapon.FireThrough)
     public Transform muzzle;
     public float recoil;
     public bool melee;
+    public bool wallbang;   // the bullet went through at least one object before it hit
 }
 
 public class Weapon : MonoBehaviour
 {
     public static event System.Action<ShotInfo> AnyShot;
     public event System.Action ReloadStarted;
+    // bullets go through objects (see Penetrable); RoundManager turns it off in simulations unless -penetration 1
+    public static bool PenetrationEnabled = true;
+    // a bullet went through an object: entry point, entry normal, exit point, exit normal (for bullet holes);
+    // also for the second and next bodies a bullet hits (for blood, CombatEffects tells them by the point)
+    public static event System.Action<Vector3, Vector3, Vector3, Vector3> AnyPenetration;
+
+    // shots and the knife hurt teammates (FriendlyFireScale of the damage); RoundManager turns it off in simulations unless -ff 1
+    public static bool FriendlyFire = true;
+    // part of the damage a teammate takes (as bullets in CS 2)
+    public const float FriendlyFireScale = 0.33f;
+
     // for sounds: any weapon started a reload / was taken in hands
     public static event System.Action<Weapon> AnyReloadStarted;
     public static event System.Action<Weapon> AnyEquipped;
@@ -76,6 +89,7 @@ public class Weapon : MonoBehaviour
     public bool Scoped { get; set; } = true;
 
     float nextShotTime;
+    float drawEndTime;
     float reloadEnd;
     int ammo;
     int reserve;
@@ -86,6 +100,8 @@ public class Weapon : MonoBehaviour
     public int Reserve { get { FinishReload(); return reserve; } }
     public bool IsReloading { get { FinishReload(); return reloading; } }
     public float NextShotTime => nextShotTime;
+    // the weapon is still being taken in the hands: no shots and no scope until the draw animation ends
+    public bool IsDrawing => Time.time < drawEndTime;
     public float ReloadProgress => reloading ? Mathf.Clamp01(1f - (reloadEnd - Time.time) / reloadTime) : 1f;
 
     void Awake()
@@ -126,6 +142,7 @@ public class Weapon : MonoBehaviour
         // the weapon is ready after its draw time, but never before its own shot cooldown has passed
         float drawEnd = Time.time + (data != null ? data.drawTime : 0f);
         nextShotTime = Mathf.Max(readyAt, drawEnd);
+        drawEndTime = drawEnd;
         AnyEquipped?.Invoke(this);
     }
 
@@ -161,6 +178,8 @@ public class Weapon : MonoBehaviour
 
     public bool TryFire()
     {
+        // nothing until the weapon is drawn (also after ResetAmmo, which clears the shot cooldown)
+        if (IsDrawing) return false;
         if (IsMelee) return Melee(false);
 
         FinishReload();
@@ -211,49 +230,23 @@ public class Weapon : MonoBehaviour
             recoil = recoilFactor
         };
 
-        if (Physics.Raycast(muzzle.position, direction, out RaycastHit hit, range))
+        if (PenetrationEnabled)
         {
+            FireThrough(direction, noScope, inAir, ref shot);
+        }
+        else if (Physics.Raycast(muzzle.position, direction, out RaycastHit hit, range))
+        {
+            // the old shot without penetration: the first collider stops the bullet,
+            // a teammate takes damage only with friendly fire
             Health target = hit.collider.GetComponentInParent<Health>();
             bool friendly = owner != null && target != null && target.team == owner.team;
             bool head = false;
 
-            if (target != null && target != owner && !friendly)
+            if (target != null && target != owner && (!friendly || FriendlyFire))
             {
-                float multiplier = 1f;
-
-                HitZone hitZone = hit.collider.GetComponent<HitZone>();
-
-                if (hitZone != null)
-                {
-                    // character model with separate head, body and leg colliders
-                    if (hitZone.zone == BodyZone.Head)
-                    {
-                        multiplier = headMultiplier;
-                        head = true;
-                    }
-                    else if (hitZone.zone == BodyZone.Legs)
-                    {
-                        multiplier = legMultiplier;
-                    }
-                }
-                else
-                {
-                    // one collider: decide by the height of the hit
-                    Bounds b = hit.collider.bounds;
-                    float t = Mathf.InverseLerp(b.min.y, b.max.y, hit.point.y);
-
-                    if (t >= headZoneStart)
-                    {
-                        multiplier = headMultiplier;
-                        head = true;
-                    }
-                    else if (t <= legZoneEnd)
-                    {
-                        multiplier = legMultiplier;
-                    }
-                }
-
-                target.TakeDamage(damage * multiplier, owner, head, noScope, inAir);
+                float multiplier = ZoneMultiplier(hit, out head);
+                if (friendly) multiplier *= FriendlyFireScale;
+                target.TakeDamage(damage * multiplier, owner, head, noScope, inAir, false, data);
             }
 
             shot.end = hit.point;
@@ -269,10 +262,197 @@ public class Weapon : MonoBehaviour
         return true;
     }
 
+    // damage multiplier of the body part that was hit
+    float ZoneMultiplier(RaycastHit hit, out bool head)
+    {
+        head = false;
+        HitZone hitZone = hit.collider.GetComponent<HitZone>();
+
+        if (hitZone != null)
+        {
+            // character model with separate head, body and leg colliders
+            if (hitZone.zone == BodyZone.Head)
+            {
+                head = true;
+                return headMultiplier;
+            }
+            if (hitZone.zone == BodyZone.Legs) return legMultiplier;
+            return 1f;
+        }
+
+        // one collider: decide by the height of the hit
+        Bounds b = hit.collider.bounds;
+        float t = Mathf.InverseLerp(b.min.y, b.max.y, hit.point.y);
+
+        if (t >= headZoneStart)
+        {
+            head = true;
+            return headMultiplier;
+        }
+        if (t <= legZoneEnd) return legMultiplier;
+        return 1f;
+    }
+
+    // ---------------- penetration ----------------
+
+    const float MaxThickness = 3f;      // a thicker object always stops the bullet
+    const int MaxPenetrations = 4;      // the bullet goes through at most this many objects and bodies together
+    const float MinDamageLeft = 0.1f;   // with less damage left the bullet gets stuck in the object
+
+    // a body (player, bot, training target) works like an object of this strength (damage loss per metre),
+    // its thickness along the shot is kept between these values
+    const float BodyStrength = 1f;
+    const float BodyMinThickness = 0.3f;
+    const float BodyMaxThickness = 1f;
+
+    // players hit by the current bullet: each one is hit once, even if the bullet crosses several of his colliders
+    static readonly List<Health> hitBodies = new List<Health>();
+
+    // the shot with penetration: the bullet goes through objects and bodies and loses damage in each of them,
+    // the loss is strength * thickness / penetration power of the weapon (see Penetrable).
+    // The shot info (for effects) describes the first player hit, or the point where the bullet stopped.
+    void FireThrough(Vector3 direction, bool noScope, bool inAir, ref ShotInfo shot)
+    {
+        RaycastHit[] hits = Physics.RaycastAll(muzzle.position, direction, range,
+                                               Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        float power = data != null ? data.penetration : 0f;
+        float left = 1f;          // part of the damage the bullet still has
+        int passed = 0;           // objects and bodies the bullet went through
+        float behind = 0f;        // distance along the shot where the bullet left the last object or body
+        bool hitPlayer = false;   // the shot info already describes the first player hit
+        hitBodies.Clear();
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit hit = hits[i];
+
+            // the muzzle is inside this collider (a single Raycast does not see it either)
+            if (hit.distance <= 0f) continue;
+
+            Health target = hit.collider.GetComponentInParent<Health>();
+            if (target != null)
+            {
+                // the shooter's own body, another collider of a player who was already hit, a dead player
+                if (target == owner || target.IsDead || hitBodies.Contains(target)) continue;
+                hitBodies.Add(target);
+
+                bool friendly = owner != null && target.team == owner.team;
+
+                // without friendly fire a teammate stops the bullet and takes no damage
+                if (friendly && !FriendlyFire)
+                {
+                    if (!hitPlayer) StopShot(ref shot, hit.point, hit.normal, target, false, passed);
+                    return;
+                }
+
+                // the second player and the next ones are hit through something, so it is a wallbang for them
+                float multiplier = ZoneMultiplier(ZoneHit(hits, i, target), out bool head);
+                if (friendly) multiplier *= FriendlyFireScale;
+                target.TakeDamage(damage * multiplier * left, owner, head, noScope, inAir, passed > 0, data);
+
+                bool first = !hitPlayer;
+                if (first)
+                {
+                    StopShot(ref shot, hit.point, hit.normal, target, head, passed);
+                    hitPlayer = true;
+                }
+
+                // the bullet goes on through the body like through an object;
+                // the damage loss uses the clamped thickness, the overlap with the next objects uses the real one
+                float depth = BodyThickness(hit, direction);
+                bool goesOn = power > 0f && passed < MaxPenetrations;
+                if (goesOn)
+                {
+                    float bodyThickness = Mathf.Clamp(depth, BodyMinThickness, BodyMaxThickness);
+                    left *= Mathf.Max(0f, 1f - BodyStrength * bodyThickness / power);
+                    goesOn = left >= MinDamageLeft;
+                }
+
+                // blood on the second and next bodies, where the bullet goes in and out (AnyShot shows the first one)
+                if (!first) AnyPenetration?.Invoke(hit.point, hit.normal, hit.point + direction * depth, direction);
+                if (!goesOn) return;
+
+                passed++;
+                behind = Mathf.Max(behind, hit.distance + depth);
+                continue;
+            }
+
+            // a wall, a box, the floor
+            float strength = Penetrable.StrengthOf(hit.collider);
+            bool canPass = power > 0f && !Penetrable.IsImpenetrable(strength) && passed < MaxPenetrations;
+
+            // the exit: cast back at this collider from a point MaxThickness behind the entry;
+            // if that point is still inside the object, there is no exit and the object is too thick
+            Ray back = new Ray(hit.point + direction * MaxThickness, -direction);
+            if (!canPass || !hit.collider.Raycast(back, out RaycastHit exit, MaxThickness + 0.01f) || exit.distance <= 0.001f)
+            {
+                if (!hitPlayer) StopShot(ref shot, hit.point, hit.normal, null, false, passed);
+                return;
+            }
+
+            float exitDistance = hit.distance + Mathf.Max(0f, MaxThickness - exit.distance);
+
+            // objects that overlap: only the part behind the previous object counts, an object fully inside it is skipped
+            if (exitDistance <= behind) continue;
+            float thickness = exitDistance - Mathf.Max(hit.distance, behind);
+
+            left *= Mathf.Max(0f, 1f - strength * thickness / power);
+            if (left < MinDamageLeft)
+            {
+                if (!hitPlayer) StopShot(ref shot, hit.point, hit.normal, null, false, passed);
+                return;
+            }
+
+            passed++;
+            behind = exitDistance;
+            AnyPenetration?.Invoke(hit.point, hit.normal, exit.point, exit.normal);
+        }
+
+        // went through everything (or hit nothing) and flew on
+        if (!hitPlayer) shot.wallbang = passed > 0;
+    }
+
+    // the collider that decides the body part: the first collider of this player along the shot that has a HitZone,
+    // otherwise the collider the bullet went in through (then the height of the hit decides)
+    static RaycastHit ZoneHit(RaycastHit[] hits, int first, Health target)
+    {
+        for (int i = first; i < hits.Length; i++)
+        {
+            if (hits[i].distance <= 0f || hits[i].collider.GetComponent<HitZone>() == null) continue;
+            if (hits[i].collider.GetComponentInParent<Health>() == target) return hits[i];
+        }
+        return hits[first];
+    }
+
+    // how far the bullet goes inside a body collider: cast back at it from a point behind the entry, like for objects
+    static float BodyThickness(RaycastHit hit, Vector3 direction)
+    {
+        const float reach = BodyMaxThickness * 2f;
+        Ray back = new Ray(hit.point + direction * reach, -direction);
+        if (hit.collider.Raycast(back, out RaycastHit exit, reach + 0.01f) && exit.distance > 0.001f)
+            return reach - exit.distance;
+        return BodyMaxThickness;
+    }
+
+    // the bullet stopped at this point (in an object or in a player)
+    static void StopShot(ref ShotInfo shot, Vector3 point, Vector3 normal, Health target, bool head, int passed)
+    {
+        shot.end = point;
+        shot.normal = normal;
+        shot.hit = true;
+        shot.headshot = head;
+        shot.target = target;
+        shot.wallbang = passed > 0;
+
+        Debug.DrawLine(shot.origin, point, Color.red, 0.1f);
+    }
+
     // right click with the knife
     public bool TrySecondary()
     {
-        return IsMelee && Melee(true);
+        return IsMelee && !IsDrawing && Melee(true);
     }
 
     bool Melee(bool stab)
@@ -301,7 +481,8 @@ public class Weapon : MonoBehaviour
             Health target = hit.collider.GetComponentInParent<Health>();
             bool friendly = owner != null && target != null && target.team == owner.team;
 
-            if (target != null && owner != null && target != owner && !friendly && !target.IsDead)
+            // a teammate gets hurt only with friendly fire
+            if (target != null && owner != null && target != owner && (!friendly || FriendlyFire) && !target.IsDead)
             {
                 float dmg = stab ? data.secondaryDamage : damage;
 
@@ -310,7 +491,8 @@ public class Weapon : MonoBehaviour
                 if (toTarget.sqrMagnitude > 0.01f && Vector3.Dot(target.transform.forward, toTarget.normalized) > 0.5f)
                     dmg = stab ? data.backstabDamage : data.backstabDamage * 0.5f;
 
-                target.TakeDamage(dmg, owner, false, false, inAir);
+                if (friendly) dmg *= FriendlyFireScale;
+                target.TakeDamage(dmg, owner, false, false, inAir, false, data);
             }
 
             shot.end = hit.point;
