@@ -1,89 +1,293 @@
 using UnityEngine;
 
-// Test loadout until the buy menu exists: keys 1-9 or the mouse wheel switch weapons.
+// The player's weapons like in CS: slot 1 = primary, 2 = pistol, 3 = knife, 4 = Zeus (if bought).
+// Keys 1-4 take a slot, the mouse wheel goes through the owned slots, Q takes the previous weapon.
+// Each slot keeps its magazine, reserve and shot cooldown while another weapon is in the hands.
+// RoundManager calls NewRound at the start of every round: a new or dead player gets the knife and the team's
+// default pistol (T: Glock-18, CT: USP-S), a survivor keeps his weapons, each with a full magazine and full reserve
+// (like CS; a used Zeus is charged, a reload of the last round is over). BuyMenu calls Give.
+// WeaponDrops (normal 5v5 games) uses Take (G, death) and PickUp (walking over a weapon, E); a bought weapon that
+// replaces another one in its slot drops the old one there.
+// The weapons come from Resources/Weapons (Economy.Weapons), the old 'slots' list is only a fallback.
 public class PlayerLoadout : MonoBehaviour
 {
+    public const int SlotCount = 4;
+    public const int PrimarySlot = 0;
+    public const int PistolSlot = 1;
+    public const int KnifeSlot = 2;
+    public const int GearSlot = 3;
+
     public Weapon weapon;
+    [Tooltip("old test list from the scene, not used for the loadout any more (it comes from Resources/Weapons " +
+             "and the buy menu); only a fallback if the knife or the default pistol is missing there")]
     public WeaponData[] slots;
 
     Health health;
     PlayerShoot shoot;
-    int[] ammo;
-    int[] reserve;
-    float[] readyAt;
-    int current;
+    readonly WeaponData[] owned = new WeaponData[SlotCount];
+    // -1 = a full magazine / full reserve (Weapon.Equip)
+    readonly int[] ammo = new int[SlotCount];
+    readonly int[] reserve = new int[SlotCount];
+    readonly float[] readyAt = new float[SlotCount];
+    int current = -1;
+    int previous = -1;
     bool initialized;
     GUIStyle style;
+
+    // for the HUD and the buy menu
+    public int CurrentSlot => current;
+    public WeaponData InSlot(int slot) => slot >= 0 && slot < SlotCount ? owned[slot] : null;
+    public bool Owns(WeaponData d) => d != null && InSlot(SlotOf(d)) == d;
+    public static int SlotOf(WeaponData d) => d != null ? (int)d.Slot : -1;
 
     void Awake()
     {
         health = GetComponent<Health>();
         shoot = GetComponent<PlayerShoot>();
+        if (weapon == null && shoot != null) weapon = shoot.weapon;
+        if (weapon == null) weapon = GetComponentInChildren<Weapon>(true);
     }
 
-    void OnEnable()
+    // ---------------- rounds ----------------
+
+    // keep = the player survived the last round: his weapons stay, each with a full magazine and full reserve
+    // (the Zeus charged); otherwise the default loadout. Equip below also ends a reload left from the last round.
+    public void NewRound(bool keep)
     {
-        RoundManager.RoundStarted += ResetSlots;
-    }
+        if (weapon == null) return;
 
-    void OnDisable()
-    {
-        RoundManager.RoundStarted -= ResetSlots;
-    }
-
-    void ResetSlots()
-    {
-        if (weapon == null || slots == null || slots.Length == 0) return;
-
-        ammo = new int[slots.Length];
-        reserve = new int[slots.Length];
-        readyAt = new float[slots.Length];
-
-        for (int i = 0; i < slots.Length; i++)
+        if (keep && initialized && HasGun())
         {
-            if (slots[i] == null) continue;
-            ammo[i] = slots[i].magazineSize;
-            reserve[i] = slots[i].reserveAmmo;
+            for (int i = 0; i < SlotCount; i++)
+            {
+                ammo[i] = -1;
+                reserve[i] = -1;
+                readyAt[i] = 0f;
+            }
+        }
+        else
+        {
+            GiveDefault();
         }
 
-        current = 0;
+        previous = -1;
+        current = -1;
         if (shoot != null) shoot.ResetZoom();
-        if (slots[0] != null)
-        {
-            // Equip fills the magazine and keeps the draw time, so the first shot waits for the draw animation
-            weapon.Equip(slots[0]);
-        }
-
+        // Equip keeps the draw time, so the first shot of the round waits for the draw animation
+        EquipSlot(BestSlot());
+        // nothing to take (no weapons in Resources): at least no reload of the last round goes on
+        if (current < 0) weapon.ResetAmmo();
         initialized = true;
     }
 
-    void Update()
+    void GiveDefault()
     {
-        if (weapon == null || slots == null || slots.Length == 0) return;
-        if (!initialized || ammo == null || ammo.Length != slots.Length) ResetSlots();
-        if (!initialized) return;
-        if (health != null && health.IsDead) return;
-        if (Cursor.lockState != CursorLockMode.Locked) return;
+        for (int i = 0; i < SlotCount; i++)
+        {
+            owned[i] = null;
+            ammo[i] = -1;
+            reserve[i] = -1;
+            readyAt[i] = 0f;
+        }
 
-        for (int i = 0; i < slots.Length && i < 9; i++)
-            if (Input.GetKeyDown(KeyCode.Alpha1 + i)) Select(i);
+        int team = health != null ? health.team : 0;
+        owned[KnifeSlot] = Economy.Knife() ?? FromList(WeaponCategory.Melee, team);
+        owned[PistolSlot] = Economy.DefaultPistol(team) ?? FromList(WeaponCategory.Pistol, team);
 
-        float wheel = Input.mouseScrollDelta.y;
-        if (wheel > 0f) Select((current - 1 + slots.Length) % slots.Length);
-        else if (wheel < 0f) Select((current + 1) % slots.Length);
+        // nothing in Resources and nothing in the list: keep whatever the weapon already has
+        if (owned[KnifeSlot] == null && owned[PistolSlot] == null && weapon.data != null)
+        {
+            int s = SlotOf(weapon.data);
+            if (s >= 0) owned[s] = weapon.data;
+        }
     }
 
-    void Select(int index)
+    // the first weapon of this category in the old scene list (the team's own one first)
+    WeaponData FromList(WeaponCategory category, int team)
     {
-        if (index == current || index < 0 || index >= slots.Length || slots[index] == null) return;
+        if (slots == null) return null;
+        WeaponData any = null;
+        foreach (WeaponData d in slots)
+        {
+            if (d == null || d.category != category) continue;
+            if (Economy.TeamCanBuy(d, team)) return d;
+            if (any == null) any = d;
+        }
+        return any;
+    }
 
+    bool HasGun()
+    {
+        for (int i = 0; i < SlotCount; i++)
+            if (owned[i] != null) return true;
+        return false;
+    }
+
+    // primary, else pistol, else knife, else the Zeus
+    int BestSlot()
+    {
+        if (owned[PrimarySlot] != null) return PrimarySlot;
+        if (owned[PistolSlot] != null) return PistolSlot;
+        if (owned[KnifeSlot] != null) return KnifeSlot;
+        if (owned[GearSlot] != null) return GearSlot;
+        return -1;
+    }
+
+    // ---------------- buying ----------------
+
+    // puts the weapon into its slot with full ammo; the old one there falls to the floor in a normal 5v5 game
+    // (WeaponDrops, like in CS), otherwise it is gone. A bought gun is taken in the hands at once, the Zeus is not
+    public bool Give(WeaponData d)
+    {
+        int slot = SlotOf(d);
+        if (weapon == null || slot < 0 || slot >= SlotCount) return false;
+        if (!initialized) NewRound(false);
+
+        if (owned[slot] != null && owned[slot] != d && slot != KnifeSlot && WeaponDrops.Active)
+            WeaponDrops.Drop(health, StateOf(slot));
+
+        owned[slot] = d;
+        ammo[slot] = -1;
+        reserve[slot] = -1;
+        readyAt[slot] = 0f;
+
+        bool take = slot == current || slot == PrimarySlot || slot == PistolSlot || current < 0;
+        if (take)
+        {
+            if (slot != current)
+            {
+                SaveCurrent();
+                if (current >= 0) previous = current;
+            }
+            current = -1;   // the old weapon of this slot is not saved: it is replaced
+            EquipSlot(slot);
+        }
+        return true;
+    }
+
+    // takes the weapon of this slot away (nothing happens to the knife); the hands get the best weapon left
+    public void Remove(int slot)
+    {
+        Take(slot);
+    }
+
+    // ---------------- weapons on the floor (WeaponDrops) ----------------
+
+    // the weapon of this slot with the ammo it has now (the one in the hands with its live magazine)
+    GunState StateOf(int slot)
+    {
+        if (slot == current) SaveCurrent();
+        return new GunState { data = owned[slot], ammo = ammo[slot], reserve = reserve[slot], readyAt = readyAt[slot] };
+    }
+
+    // takes the weapon of this slot out with its ammo (G, death); never the knife.
+    // A living player's hands take the best weapon left, a dead player's stay as they are
+    public GunState Take(int slot)
+    {
+        if (weapon == null || slot < 0 || slot >= SlotCount || slot == KnifeSlot || owned[slot] == null) return default;
+
+        GunState gun = StateOf(slot);
+        owned[slot] = null;
+        ammo[slot] = -1;
+        reserve[slot] = -1;
+        readyAt[slot] = 0f;
+        if (previous == slot) previous = -1;
+        if (current == slot)
+        {
+            current = -1;
+            if (health == null || !health.IsDead) EquipSlot(BestSlot());
+        }
+        return gun;
+    }
+
+    // a weapon from the floor goes into its slot with its ammo; the weapon that was in that slot comes back in 'old'
+    // (not Valid when the slot was empty), the caller drops it. take = the hands switch to it
+    // (always when it replaces the weapon in the hands)
+    public bool PickUp(GunState gun, bool take, out GunState old)
+    {
+        old = default;
+        int slot = SlotOf(gun.data);
+        if (weapon == null || slot < 0 || slot >= SlotCount || slot == KnifeSlot) return false;
+        if (health != null && health.IsDead) return false;
+        if (!initialized) NewRound(false);
+
+        if (owned[slot] != null) old = StateOf(slot);
+        owned[slot] = gun.data;
+        ammo[slot] = gun.ammo;
+        reserve[slot] = gun.reserve;
+        readyAt[slot] = gun.readyAt;
+
+        if (slot == current)
+        {
+            // the weapon in the hands was swapped: the old one is not saved again
+            current = -1;
+            EquipSlot(slot);
+        }
+        else if (take || current < 0)
+        {
+            SaveCurrent();
+            if (current >= 0) previous = current;
+            EquipSlot(slot);
+        }
+        return true;
+    }
+
+    // ---------------- switching ----------------
+
+    void Update()
+    {
+        if (weapon == null) return;
+        if (!initialized) NewRound(false);
+        if (health != null && health.IsDead) return;
+        if (MainMenu.IsOpen || Time.timeScale <= 0f) return;
+        if (Cursor.lockState != CursorLockMode.Locked) return;
+
+        for (int i = 0; i < SlotCount; i++)
+            if (Input.GetKeyDown(KeyCode.Alpha1 + i)) Select(i);
+
+        if (Input.GetKeyDown(KeyCode.Q) && previous >= 0) Select(previous);
+
+        float wheel = Input.mouseScrollDelta.y;
+        if (wheel > 0f) Select(NextOwned(-1));
+        else if (wheel < 0f) Select(NextOwned(1));
+    }
+
+    // the next owned slot in this direction, going round
+    int NextOwned(int dir)
+    {
+        int start = current < 0 ? 0 : current;
+        for (int step = 1; step <= SlotCount; step++)
+        {
+            int i = ((start + dir * step) % SlotCount + SlotCount) % SlotCount;
+            if (owned[i] != null) return i;
+        }
+        return current;
+    }
+
+    void Select(int slot)
+    {
+        if (slot == current || slot < 0 || slot >= SlotCount || owned[slot] == null) return;
+
+        SaveCurrent();
+        if (current >= 0) previous = current;
+        EquipSlot(slot);
+    }
+
+    // the ammo and the shot cooldown of the weapon in the hands go back to its slot
+    void SaveCurrent()
+    {
+        if (current < 0 || current >= SlotCount || owned[current] == null || weapon.data != owned[current]) return;
         ammo[current] = weapon.Ammo;
         reserve[current] = weapon.Reserve;
         readyAt[current] = weapon.NextShotTime;
+    }
 
-        current = index;
+    void EquipSlot(int slot)
+    {
+        if (slot < 0 || slot >= SlotCount || owned[slot] == null) return;
+        current = slot;
         if (shoot != null) shoot.ResetZoom();
-        weapon.Equip(slots[index], ammo[index], reserve[index], readyAt[index]);
+        weapon.Equip(owned[slot], ammo[slot], reserve[slot], readyAt[slot]);
     }
 
     // ---------------- weapon slot list (bottom right, above the ammo box of GameHud) ----------------
@@ -93,22 +297,26 @@ public class PlayerLoadout : MonoBehaviour
     const float ListFadeTime = 0.4f;
 
     GUIStyle keyStyle;
-    int shownSlot;
+    int shownSlot = -1;
+    WeaponData shownData;
     float listShownAt = -100f;
     readonly System.Collections.Generic.Dictionary<WeaponData, Texture2D> icons =
         new System.Collections.Generic.Dictionary<WeaponData, Texture2D>();
 
     void OnGUI()
     {
-        if (slots == null || slots.Length == 0 || !initialized) return;
+        if (!initialized) return;
         if (health != null && health.IsDead) return;
         if (Time.timeScale == 0f) return;   // a menu is open
+        if (BuyMenu.IsOpen) return;
         if (Event.current.type != EventType.Repaint) return;
 
+        WeaponData inHands = current >= 0 ? owned[current] : null;
         bool locked = Cursor.lockState == CursorLockMode.Locked;
-        if (current != shownSlot || (locked && (Input.mouseScrollDelta.y != 0f || SlotKeyDown())))
+        if (current != shownSlot || inHands != shownData || (locked && (Input.mouseScrollDelta.y != 0f || SlotKeyDown())))
         {
             shownSlot = current;
+            shownData = inHands;
             listShownAt = Time.time;
         }
 
@@ -126,7 +334,7 @@ public class PlayerLoadout : MonoBehaviour
         keyStyle.fontSize = Mathf.Max(6, Mathf.RoundToInt(20f * k));
 
         int count = 0;
-        foreach (WeaponData d in slots) if (d != null) count++;
+        foreach (WeaponData d in owned) if (d != null) count++;
 
         float w = GameHud.AmmoBoxWidth * k;
         float rowH = Mathf.Round(34f * k);
@@ -137,9 +345,9 @@ public class PlayerLoadout : MonoBehaviour
         float y = bottom - count * (rowH + gap) + gap;
         Color accent = new Color(1f, 0.8f, 0.3f, alpha);
 
-        for (int i = 0; i < slots.Length; i++)
+        for (int i = 0; i < SlotCount; i++)
         {
-            if (slots[i] == null) continue;
+            if (owned[i] == null) continue;
             bool selected = i == current;
             Rect r = new Rect(x, Mathf.Round(y), w, rowH);
             y += rowH + gap;
@@ -154,7 +362,7 @@ public class PlayerLoadout : MonoBehaviour
             GameHud.Text(new Rect(r.xMax - pad - keyW, r.y, keyW, rowH), GameHud.Num(i + 1), keyStyle,
                 selected ? accent : text, TextAnchor.MiddleRight);
 
-            Texture2D icon = Icon(slots[i]);
+            Texture2D icon = Icon(owned[i]);
             if (icon != null && icon.height > 0)
             {
                 float ih = Mathf.Round(22f * k);
@@ -164,16 +372,16 @@ public class PlayerLoadout : MonoBehaviour
                 GUI.color = Color.white;
             }
 
-            GameHud.Text(new Rect(r.x + pad, r.y, w * 0.5f, rowH), slots[i].weaponName, style, text, TextAnchor.MiddleLeft);
+            GameHud.Text(new Rect(r.x + pad, r.y, w * 0.5f, rowH), owned[i].weaponName, style, text, TextAnchor.MiddleLeft);
         }
         GUI.color = Color.white;
     }
 
     bool SlotKeyDown()
     {
-        for (int i = 0; i < slots.Length && i < 9; i++)
+        for (int i = 0; i < SlotCount; i++)
             if (Input.GetKeyDown(KeyCode.Alpha1 + i)) return true;
-        return false;
+        return Input.GetKeyDown(KeyCode.Q);
     }
 
     // the killfeed silhouette of the weapon (Resources/KillIcons/<weapon name>), null if there is none

@@ -13,6 +13,8 @@ using UnityEngine.SceneManagement;
 //   tunnels), made once at the start from physics queries, so players and bodies never appear in it.
 // - The radar turns with the view (forward is up), the player is the white arrow in the centre.
 //   While the dead player watches a teammate, the radar is centred on that teammate.
+// - Buy zones (RoundManager.BuyZones, normal 5v5 games only): the player's team zone green, the enemy zone red,
+//   a see-through circle with an outline, drawn over the map and under the dots.
 // It adds itself to every scene with a RoundManager and a player, never in simulations.
 public class Radar : MonoBehaviour
 {
@@ -23,6 +25,8 @@ public class Radar : MonoBehaviour
     [Range(0f, 1f)] public float opacity = 0.85f;
     public Color allyColor = new Color(0.35f, 0.78f, 1f, 1f);
     public Color enemyColor = new Color(1f, 0.2f, 0.18f, 1f);
+    public Color ownZoneColor = new Color(0.3f, 0.95f, 0.4f, 1f);
+    public Color enemyZoneColor = new Color(1f, 0.27f, 0.22f, 1f);
 
     [Header("Spotting")]
     [Tooltip("seconds between the visibility checks")] public float checkInterval = 0.1f;
@@ -47,6 +51,13 @@ public class Radar : MonoBehaviour
 
     const byte Void = 0, Wall = 1, Floor = 2, Raised = 3;
 
+    // the buy zone texture: the circle takes this part of its width (the clear rest keeps the clamped edge and the
+    // mip levels see-through), the outline is this part of the radius, the inside this opaque
+    const float ZoneFill = 0.8f;
+    const float ZoneLine = 0.09f;
+    const float ZoneInside = 0.28f;
+    const int ZoneMips = 4;
+
     static readonly Color32 VoidColor = new Color32(14, 16, 19, 255);
     static readonly Color32 WallColor = new Color32(38, 41, 46, 255);
     static readonly Color32 FloorColor = new Color32(88, 93, 99, 255);
@@ -70,7 +81,9 @@ public class Radar : MonoBehaviour
 
     readonly Dictionary<Health, Spot> spots = new Dictionary<Health, Spot>();
     readonly List<Health> gone = new List<Health>();
-    readonly Vector3[] bodyPoints = new Vector3[5];
+    // a character model gives up to 7 points from its hitboxes (CharacterBody.AimPoints), the capsule 5
+    readonly Vector3[] bodyPoints = new Vector3[8];
+    static readonly RaycastHit[] lineHits = new RaycastHit[32];
     float nextCheck;
 
     // the centre of the radar this frame
@@ -86,8 +99,8 @@ public class Radar : MonoBehaviour
     float mapReadyAt;
     Material mapMaterial;
     RenderTexture view;              // the round map turned with the view, drawn every frame
-    Texture2D ringTexture, dotTexture, arrowTexture;
-    bool flipY;                      // drawing into a texture comes out upside down on this graphics API
+    Texture2D ringTexture, dotTexture, arrowTexture, zoneTexture;
+    bool flipY;                     // drawing into a texture comes out upside down on this graphics API
 
     readonly RaycastHit[] rayHits = new RaycastHit[16];
     readonly Collider[] overlaps = new Collider[16];
@@ -211,6 +224,7 @@ public class Radar : MonoBehaviour
         if (ringTexture != null) Destroy(ringTexture);
         if (dotTexture != null) Destroy(dotTexture);
         if (arrowTexture != null) Destroy(arrowTexture);
+        if (zoneTexture != null) Destroy(zoneTexture);
     }
 
     void OnRoundStarted()
@@ -297,18 +311,18 @@ public class Radar : MonoBehaviour
 
             if (o == playerHealth)
             {
-                if (playerCam != null && PlayerSees(b, st, target)) return true;
+                if (playerCam != null && PlayerSees(b, st, target, o)) return true;
                 continue;
             }
 
             BotController bot = o.GetComponent<BotController>();
-            if (bot != null && bot.head != null && BotSees(bot, b, st, target)) return true;
+            if (bot != null && bot.head != null && BotSees(bot, b, st, target, o)) return true;
         }
         return false;
     }
 
     // the human player sees what is on his screen
-    bool PlayerSees(Bounds b, Stealth st, Health target)
+    bool PlayerSees(Bounds b, Stealth st, Health target, Health self)
     {
         Vector3 from = playerCam.transform.position;
         float radius = st != null ? st.DetectionRadius(playerViewRange) : playerViewRange;
@@ -317,18 +331,18 @@ public class Radar : MonoBehaviour
 
         Vector3 flat = toTarget;
         flat.y = 0f;
-        int count = BodyPoints(b, flat);
+        int count = TargetPoints(target, b, flat);
         for (int i = 0; i < count; i++)
         {
             Vector3 v = playerCam.WorldToViewportPoint(bodyPoints[i]);
             if (v.z <= 0f || v.x < 0f || v.x > 1f || v.y < 0f || v.y > 1f) continue;   // off the screen
-            if (ClearLine(from, bodyPoints[i], target)) return true;
+            if (ClearLine(from, bodyPoints[i], target, self)) return true;
         }
         return false;
     }
 
     // a bot sees like in BotController: view range (shorter for a stealthy target), field of view, body points
-    bool BotSees(BotController bot, Bounds b, Stealth st, Health target)
+    bool BotSees(BotController bot, Bounds b, Stealth st, Health target, Health self)
     {
         Vector3 from = bot.head.position;
         float radius = st != null ? st.DetectionRadius(bot.viewRange) : bot.viewRange;
@@ -341,21 +355,37 @@ public class Radar : MonoBehaviour
         if (!bot.IsAlerted && flat.sqrMagnitude > 0.0001f && Vector3.Angle(bot.transform.forward, flat) > bot.fieldOfView * 0.5f)
             return false;
 
-        int count = BodyPoints(b, flat);
+        int count = TargetPoints(target, b, flat);
         for (int i = 0; i < count; i++)
-            if (ClearLine(from, bodyPoints[i], target)) return true;
+            if (ClearLine(from, bodyPoints[i], target, self)) return true;
         return false;
     }
 
-    // the first thing on the line is the target (corpses are on Ignore Raycast, so they do not block it)
-    static bool ClearLine(Vector3 from, Vector3 to, Health target)
+    // the points of the target to check: the centres of his hitboxes (a character model), else the capsule's points
+    int TargetPoints(Health target, Bounds b, Vector3 flat)
+    {
+        CharacterBody cb = target.GetComponent<CharacterBody>();
+        int count = cb != null ? cb.AimPoints(bodyPoints) : 0;
+        return count > 0 ? count : BodyPoints(b, flat);
+    }
+
+    // the first thing on the line is the target (corpses are on Ignore Raycast, so they do not block it);
+    // the one who looks is not in his own way (the hitboxes of his arms and gun hands in front of his eyes)
+    static bool ClearLine(Vector3 from, Vector3 to, Health target, Health self)
     {
         Vector3 dir = to - from;
         float d = dir.magnitude;
         if (d < 0.01f) return true;
 
-        return Physics.Raycast(from, dir / d, out RaycastHit hit, d + 0.5f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
-               && hit.collider.GetComponentInParent<Health>() == target;
+        int n = Physics.RaycastNonAlloc(from, dir / d, lineHits, d + 0.5f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        int best = -1;
+        for (int i = 0; i < n; i++)
+        {
+            if (best >= 0 && lineHits[i].distance >= lineHits[best].distance) continue;
+            if (self != null && lineHits[i].collider.GetComponentInParent<Health>() == self) continue;
+            best = i;
+        }
+        return best >= 0 && lineHits[best].collider.GetComponentInParent<Health>() == target;
     }
 
     // centre, upper chest, head and both shoulders, from the body's collider
@@ -459,6 +489,7 @@ public class Radar : MonoBehaviour
         Fan(blankTexture, 1f, size * 0.5f, radius, scale);
         float fade = mapTexture != null ? Mathf.Clamp01((Time.time - mapReadyAt) / 0.5f) : 0f;
         if (fade > 0f) Fan(mapTexture, fade, size * 0.5f, radius, scale);
+        DrawBuyZones(size * 0.5f, radius, scale);
 
         GL.PopMatrix();
         RenderTexture.active = previous;
@@ -505,29 +536,56 @@ public class Radar : MonoBehaviour
     // so the map is turned and cut round at the same time
     void Fan(Texture texture, float alpha, float half, float radius, float scale)
     {
+        Fan(texture, new Color(1f, 1f, 1f, alpha), half, radius, scale, mapOrigin, mapSize);
+    }
+
+    // the same with a tint and a texture lying on the world rectangle origin .. origin + area (x, z)
+    void Fan(Texture texture, Color color, float half, float radius, float scale, Vector2 origin, Vector2 area)
+    {
         Vector3 right = new Vector3(centreForward.z, 0f, -centreForward.x);
 
         mapMaterial.mainTexture = texture;
         mapMaterial.SetPass(0);
         GL.Begin(GL.TRIANGLES);
-        GL.Color(new Color(1f, 1f, 1f, alpha));
+        GL.Color(color);
         for (int i = 0; i < Segments; i++)
         {
             float a0 = i * Mathf.PI * 2f / Segments;
             float a1 = (i + 1) * Mathf.PI * 2f / Segments;
-            FanVertex(0f, 0f, half, scale, right);
-            FanVertex(Mathf.Cos(a0) * radius, Mathf.Sin(a0) * radius, half, scale, right);
-            FanVertex(Mathf.Cos(a1) * radius, Mathf.Sin(a1) * radius, half, scale, right);
+            FanVertex(0f, 0f, half, scale, right, origin, area);
+            FanVertex(Mathf.Cos(a0) * radius, Mathf.Sin(a0) * radius, half, scale, right, origin, area);
+            FanVertex(Mathf.Cos(a1) * radius, Mathf.Sin(a1) * radius, half, scale, right, origin, area);
         }
         GL.End();
     }
 
     // x, y: pixels from the centre, x to the right and y down (forward is up)
-    void FanVertex(float x, float y, float half, float scale, Vector3 right)
+    void FanVertex(float x, float y, float half, float scale, Vector3 right, Vector2 origin, Vector2 area)
     {
         Vector3 world = centrePos + (right * x - centreForward * y) / scale;
-        GL.TexCoord2((world.x - mapOrigin.x) / mapSize.x, (world.z - mapOrigin.y) / mapSize.y);
+        GL.TexCoord2((world.x - origin.x) / area.x, (world.z - origin.y) / area.y);
         GL.Vertex3(half + x, half + y, 0f);
+    }
+
+    // the buy zones in normal games: the player's team green, the enemies' red. Each zone is a circle texture laid on
+    // the world like the map, so the same fan turns it with the view and cuts it at the radar's edge.
+    void DrawBuyZones(float half, float radius, float scale)
+    {
+        if (!Economy.Enabled || RoundManager.BuyZones.Count == 0 || playerHealth == null) return;
+        if (zoneTexture == null) zoneTexture = MakeZone(256);
+
+        int team = playerHealth.team;
+        float reach = Mathf.Max(range, 1f) * 1.5f;   // the radar's corner is range * sqrt 2 away
+        foreach (RoundManager.BuyZone z in RoundManager.BuyZones)
+        {
+            if (z.radius <= 0f) continue;
+            Vector2 d = new Vector2(z.center.x - centrePos.x, z.center.z - centrePos.z);
+            if (d.magnitude > reach + z.radius) continue;   // far off the radar
+
+            float side = z.radius * 2f / ZoneFill;
+            Vector2 origin = new Vector2(z.center.x - side * 0.5f, z.center.z - side * 0.5f);
+            Fan(zoneTexture, z.team == team ? ownZoneColor : enemyZoneColor, half, radius, scale, origin, new Vector2(side, side));
+        }
     }
 
     float RadarTop(float k)
@@ -855,6 +913,35 @@ public class Radar : MonoBehaviour
         t.filterMode = FilterMode.Bilinear;
         t.SetPixels32(px);
         t.Apply(false, true);
+        return t;
+    }
+
+    // a white see-through circle with a solid outline, tinted by the team colour when drawn;
+    // a few mip levels only, so the clear edge stays clear (the texture is clamped)
+    static Texture2D MakeZone(int n)
+    {
+        float radius = n * 0.5f * ZoneFill;
+        float line = Mathf.Max(1.5f, radius * ZoneLine);
+        float c = n * 0.5f;
+        Color32[] px = new Color32[n * n];
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+            {
+                float dx = x + 0.5f - c;
+                float dy = y + 0.5f - c;
+                float d = radius - Mathf.Sqrt(dx * dx + dy * dy);   // above zero inside
+                float inside = Mathf.Clamp01(d + 0.5f);
+                float rim = inside * Mathf.Clamp01(line + 0.5f - d);
+                float a = inside * ZoneInside + rim * (1f - ZoneInside);
+                px[y * n + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
+            }
+
+        Texture2D t = new Texture2D(n, n, TextureFormat.RGBA32, ZoneMips, false);
+        t.name = "Radar buy zone";
+        t.wrapMode = TextureWrapMode.Clamp;
+        t.filterMode = FilterMode.Trilinear;
+        t.SetPixels32(px);
+        t.Apply(true, true);
         return t;
     }
 

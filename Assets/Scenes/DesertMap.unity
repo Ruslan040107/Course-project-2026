@@ -1935,8 +1935,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.6, z: 0}
+  m_LocalRotation: {x: 0.09026784, y: 0.76418656, z: -0.10963969, w: 0.62916595}
+  m_LocalPosition: {x: -5.612559, y: 2.4136415, z: 7.721026}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2004,17 +2004,41 @@ MonoBehaviour:
   damage: 25
   headMultiplier: 3
   legMultiplier: 0.75
+  chestMultiplier: 1
+  stomachMultiplier: 1.25
+  armorPenetration: 0.775
+  effectiveRange: 0
   headZoneStart: 0.72
   legZoneEnd: 0.35
+  stomachZoneEnd: 0.52
   fireRate: 8
   range: 100
   spreadAngle: 1
   automatic: 1
+  boltAction: 0
+  silenced: 0
+  dual: 0
+  burstCount: 0
+  burstFireRate: 20
+  burstSpreadMultiplier: 1.25
+  burstCooldown: 0.35
+  pellets: 0
+  pelletSpread: 3
+  shellReload: 0
+  shellReloadTime: 0.4
+  shellStartDelay: 0.4
+  fireDelay: 0
+  hammerSpreadMultiplier: 0.5
+  altFireRate: 0
+  altSpreadMultiplier: 3
+  taser: 0
+  rechargeTime: 30
   magazineSize: 30
   reserveAmmo: 90
   reloadTime: 2.2
   botSpreadMultiplier: 2
   moveSpeedFactor: 1
+  firingMoveSpeedFactor: 0
   recoilFactor: 1
 --- !u!1 &350688683
 GameObject:
@@ -5780,6 +5804,10 @@ MonoBehaviour:
   popupTime: 1.2
   dpsWindow: 1
   resetKey: 116
+  modelPath: Characters/CT_Swat
+  poseClip: Idle
+  poseTime: 0
+  facePlayer: 1
 --- !u!114 &1048157123
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9135,16 +9163,18 @@ MonoBehaviour:
   speedPenalty: 0.1
   radiusFactor: 0.7
   revealTime: 1
+  botSneakChance: 0.6
+  botCrouchChance: 0.4
   bhopLevel0: 1
   bhopLevel1: 1
   weaponTeam0: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
   weaponTeam1: {fileID: 11400000, guid: f028c8c4eabd06941aba8e32412f5180, type: 2}
-  soloMode: 0
+  soloMode: 1
   trainingTarget: {fileID: 1048157121}
-  botsPerTeam: 5
+  botsPerTeam: 1
   roundTime: 60
   breakTime: 3
-  roundsToWin: 30
+  roundsToWin: 5
   simulation: 0
   simTimeScale: 10
   roundsToSimulate: 300

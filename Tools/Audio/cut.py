@@ -69,16 +69,4 @@ for f in sorted(os.listdir(os.path.join(root, 'Ruger Mark III'))):
         seg = sosfilt(sos_hp, sosfilt(sos_lp, seg))
         d = save(os.path.join(out, 'Weapons', 'USP-S', 'shot_%d.wav' % k), seg, sr, gain=0.75)
         print('USP-S', k, f, round(t, 2), 'len', round(d, 2)); k += 1
-# knife whoosh: band-passed noise with a rising then falling centre frequency (made here, not recorded)
-rng = np.random.default_rng(7)
-for i in range(3):
-    n = int(0.32 * SR); t = np.arange(n) / SR
-    noise = rng.standard_normal(n)
-    env = np.sin(np.pi * t / t[-1]) ** 2
-    y = np.zeros(n); block = 512
-    for s in range(0, n, block):
-        p = s / n; fc = 600 + 2200 * np.sin(np.pi * p) + 300 * i
-        sos = butter(2, [fc * 0.6, fc * 1.4], 'bandpass', fs=SR, output='sos')
-        y[s:s + block] = sosfilt(sos, noise[s:s + block])
-    save(os.path.join(out, 'Knife', 'swing_%d.wav' % i), y * env, SR, gain=0.6)
-print('knife whoosh done')
+# the knife sounds are made by make_knife_sounds.py now

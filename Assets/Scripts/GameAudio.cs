@@ -2,8 +2,20 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
-// All game sounds: shots (a far shot sounds duller), reloads, weapon draw, AWP bolt, knife,
+// All game sounds: shots (a far shot sounds duller), reloads, weapon draw, bolts, shotgun pumps and shells, knife,
 // bullet hits (body, head, wall), footsteps (concrete, wood, sand by the floor material), jumps and landings.
+// - Shots: Weapons/<weapon name>/shot (a weapon without clips borrows a weapon of its kind); silenced weapons
+//   (WeaponData.silenced) are quieter and heard less far; a shotgun shell is one shot sound, not one per pellet.
+// - Knife (as in CS 2): Knife/air for a swing in the air, Knife/wall for a wall or the floor, Knife/body for a player,
+//   Knife/stab for the right click stab on a player (if there is such a clip), Knife/flip for the butterfly flip.
+// - Hits on players: Impacts/body or Impacts/head (a headshot "tink"); the player hears his own hits close,
+//   at any distance, like the hit confirmation of CS 2.
+// - Jumps: Movement/jump (cloth rustle + shoe scuff) and Movement/land (shoes + body thud), each with a step of
+//   the floor's material.
+// - Bolt-action rifles (WeaponData.boltAction) cycle the bolt after a bot's shot; pump-action shotguns
+//   (Nova, MAG-7; the Sawed-Off is break-action) play Mech/pump_back and pump_forward after every shot; a shell reload plays
+//   Reload/<weapon>/shell (or mag_in) for every shell. The Zeus is Weapons/Zeus x27/shot.
+// A missing clip is silent (or a similar older clip is used), never an error.
 // Clips are loaded from Resources/Audio (sources and licenses are in CREDITS.md).
 // The player's own sounds are 2D, everybody else's are 3D at their position.
 // The player's reload, bolt and draw sounds come from his first person animations (ViewModel.AnimationSound),
@@ -19,6 +31,7 @@ public class GameAudio : MonoBehaviour
     [Header("Ranges (m)")]
     public float shotRange = 90f;
     public float silencedRange = 30f;
+    public float taserRange = 25f;
     public float footstepRange = 28f;
     public float hitRange = 30f;
 
@@ -46,8 +59,18 @@ public class GameAudio : MonoBehaviour
         public float at;
         public string clip;
         public Weapon weapon;
+        public WeaponData data;            // the sound is dropped when the weapon was switched meanwhile
         public bool onlyWhileReloading;
+        public bool notWhileReloading;
+        public bool unlessViewModelShells;  // the player's shell: dropped when the first person animation has its own
         public float volume, pitch;
+    }
+
+    // the shot clip of a weapon and its pitch (a borrowed clip can be pitched), null = silent
+    struct ShotSound
+    {
+        public string clip;
+        public float pitch;
     }
 
     // what we remember about everybody who walks: steps, jumps and landings
@@ -72,7 +95,14 @@ public class GameAudio : MonoBehaviour
     readonly Dictionary<Health, Mover> movers = new Dictionary<Health, Mover>();
     readonly Dictionary<Health, Weapon> weapons = new Dictionary<Health, Weapon>();
     readonly List<Pending> pending = new List<Pending>();
+    readonly Dictionary<WeaponData, ShotSound> shotSounds = new Dictionary<WeaponData, ShotSound>();
     int next;
+    // the last body hit sound (the pellets of one shell hit in the same frame)
+    int lastHitFrame = -1;
+    Health lastHitTarget;
+    bool lastHitHead;
+    // the first person animation sends its own pump / shell cues, so they are not timed here for the player
+    bool viewModelPumps, viewModelShells;
     AudioListener listener;
 
     // steps, jumps and landings fade slower than the linear rolloff: still heard at half the range
@@ -98,17 +128,48 @@ public class GameAudio : MonoBehaviour
             pool.Add(new Voice { src = src, lowPass = lp });
         }
 
+        // the round win announcement: its own 2D source, never taken by the pool, no random pitch
+        GameObject an = new GameObject("Round end voice");
+        an.transform.SetParent(transform, false);
+        announcer = an.AddComponent<AudioSource>();
+        announcer.playOnAwake = false;
+        announcer.spatialBlend = 0f;
+        announcer.dopplerLevel = 0f;
+
         Weapon.AnyShot += OnShot;
         Weapon.AnyReloadStarted += OnReload;
         Weapon.AnyEquipped += OnEquipped;
+        Weapon.AnyShellInserted += OnShellInserted;
         ViewModel.AnimationSound += OnAnimationSound;
+        RoundManager.RoundEnded += OnRoundEnded;
+    }
+
+    [Tooltip("volume of the round win announcement")] [Range(0f, 1f)] public float roundEndVolume = 0.9f;
+    AudioSource announcer;
+
+    // a team won the round: "Terrorists win" / "Counter-Terrorists win". The author's own clips in
+    // Audio/RoundEnd/Local (not in git) are used when they exist, else the CC0 jingles in Audio/RoundEnd/Default.
+    void OnRoundEnded(int winner, Health mvp, int mvpKills)
+    {
+        if (announcer == null || winner < 0) return;
+        string name = winner == 0 ? "t_win" : "ct_win";
+        AudioClip[] set = Get("RoundEnd/Local/" + name);
+        if (set.Length == 0) set = Get("RoundEnd/Default/" + name);
+        if (set.Length == 0) return;
+        announcer.Stop();
+        announcer.clip = set[Random.Range(0, set.Length)];
+        announcer.volume = roundEndVolume * masterVolume;
+        announcer.pitch = 1f;
+        announcer.Play();
     }
 
     void OnDestroy()
     {
+        RoundManager.RoundEnded -= OnRoundEnded;
         Weapon.AnyShot -= OnShot;
         Weapon.AnyReloadStarted -= OnReload;
         Weapon.AnyEquipped -= OnEquipped;
+        Weapon.AnyShellInserted -= OnShellInserted;
         ViewModel.AnimationSound -= OnAnimationSound;
     }
 
@@ -200,14 +261,27 @@ public class GameAudio : MonoBehaviour
         return w;
     }
 
-    void Schedule(float delay, string clip, Weapon w, bool onlyWhileReloading, float volume, float pitch = 1f)
+    void Schedule(float delay, string clip, Weapon w, bool onlyWhileReloading, float volume, float pitch = 1f,
+                  bool notWhileReloading = false, bool unlessViewModelShells = false)
     {
-        pending.Add(new Pending { at = Time.time + delay, clip = clip, weapon = w, onlyWhileReloading = onlyWhileReloading, volume = volume, pitch = pitch });
+        pending.Add(new Pending
+        {
+            at = Time.time + delay,
+            clip = clip,
+            weapon = w,
+            data = w != null ? w.data : null,
+            onlyWhileReloading = onlyWhileReloading,
+            notWhileReloading = notWhileReloading,
+            unlessViewModelShells = unlessViewModelShells,
+            volume = volume,
+            pitch = pitch
+        });
     }
 
-    // a reload part of the weapon ("mag_out", "mag_in", "bolt_back", "bolt_forward", "slide_back", "slide_forward"):
-    // Reload/<weapon name>/<key> (a bolt key takes the slide clip and back, if the weapon has only the other one),
-    // or the old generic clip when the weapon has no own set
+    // a reload part of the weapon ("mag_out", "mag_in", "bolt_back", "bolt_forward", "slide_back", "slide_forward",
+    // "pump_back", "pump_forward", "shell"): Reload/<weapon name>/<key> (a bolt key takes the slide clip and back,
+    // a shell the mag_in clip, if the weapon has only the other one), then Mech/<key> for a pump or a shell,
+    // or the old generic clip
     string ReloadClip(WeaponData d, string key, out float pitch)
     {
         pitch = 1f;
@@ -216,20 +290,34 @@ public class GameAudio : MonoBehaviour
             string own = "Reload/" + d.weaponName + "/" + key;
             if (Get(own).Length > 0) return own;
 
-            string other = key.StartsWith("bolt") ? key.Replace("bolt", "slide") : key.Replace("slide", "bolt");
+            string other = key == "shell" ? "mag_in"
+                : key.StartsWith("bolt") ? key.Replace("bolt", "slide") : key.Replace("slide", "bolt");
             own = "Reload/" + d.weaponName + "/" + other;
             if (other != key && Get(own).Length > 0) return own;
         }
 
+        if (key == "shell" || key.StartsWith("pump"))
+        {
+            string generic = "Mech/" + key;
+            if (Get(generic).Length > 0) return generic;
+        }
+
         if (key == "mag_out") return "Mech/mag_out";
         if (key == "mag_in") return "Mech/mag_in";
+        if (key == "shell")
+        {
+            pitch = 1.2f;
+            return "Mech/mag_in";
+        }
         pitch = key.EndsWith("_back") ? 0.85f : 1.15f;
+        if (key.StartsWith("pump")) pitch *= 0.85f;
         return "Mech/bolt";
     }
 
     static float ReloadVolume(string key)
     {
         if (key == "mag_out") return 0.55f;
+        if (key == "shell") return 0.6f;
         if (key.EndsWith("_back")) return 0.6f;
         return 0.7f;   // mag_in and the bolt or slide going forward are the loud ones
     }
@@ -254,53 +342,199 @@ public class GameAudio : MonoBehaviour
 
         if (s.melee)
         {
-            Play("Knife/swing", from, 0.6f, 15f, local);
-            if (damaging) Play("Impacts/knife_body", s.end, 0.8f, hitRange, false);
-            else if (s.hit && s.target == null) Play("Impacts/knife_wall", s.end, 0.5f, hitRange, false);
+            KnifeSound(s, w, from, local);
             return;
         }
 
-        string weaponName = w != null && w.data != null ? w.data.weaponName : "AK-47";
-        if (Get("Weapons/" + weaponName + "/shot").Length == 0) weaponName = "AK-47";
-        bool silenced = weaponName == "USP-S";
-
-        Play("Weapons/" + weaponName + "/shot", from, silenced ? 0.7f : 0.9f, silenced ? silencedRange : shotRange, local);
-
-        // the AWP bolt of a bot: back and forward while the next round goes in
-        // (the player's bolt sounds come from his first person animation)
-        if (!byPlayer && w != null && w.data != null && w.data.category == WeaponCategory.Sniper)
+        // the other pellets of a shotgun shell: the first pellet has the shot sound, the bots' hearing and the pump;
+        // a pellet only adds the sound of a body it hit first (no wall sounds, nine at once would eat the voices)
+        if (s.pellet)
         {
-            float boltTime = 1f / Mathf.Max(w.fireRate, 0.01f);
-            ScheduleReload(boltTime * 0.3f, w, "bolt_back", false, 0.5f);
-            ScheduleReload(boltTime * 0.55f, w, "bolt_forward", false, 0.55f);
+            if (damaging) BodyHit(s);
+            return;
         }
 
-        if (damaging)
+        // WeaponData.silenced (the shot says it, the weapon too), never the weapon name
+        bool silenced = s.silenced || (w != null && w.Silenced);
+        ShotSound shot = ShotSoundOf(w);
+        if (shot.clip != null)
         {
-            Play("Impacts/body", s.end, 0.7f, hitRange, false);
-            if (s.headshot) Play("Impacts/head", s.end, 0.9f, hitRange, false, 1.5f);
-        }
-        else if (s.hit && s.target == null)
-        {
-            Play("Impacts/wall", s.end, 0.25f, 20f, false, 1.3f);
+            float range = silenced ? silencedRange : s.taser ? taserRange : shotRange;
+            Play(shot.clip, from, silenced ? 0.7f : 0.9f, range, local, shot.pitch);
         }
 
-        if (byPlayer) BotController.Noise(from, silenced ? hearSilencedShot : hearShot, s.shooter);
+        if (w != null)
+        {
+            // the bolt of a bot's bolt-action rifle (AWP, SSG 08): back and forward while the next round goes in
+            // (the player's bolt sounds come from his first person animation)
+            if (!byPlayer && w.BoltAction)
+            {
+                float boltTime = 1f / Mathf.Max(w.fireRate, 0.01f);
+                ScheduleReload(boltTime * 0.3f, w, "bolt_back", false, 0.5f);
+                ScheduleReload(boltTime * 0.55f, w, "bolt_forward", false, 0.55f);
+            }
+
+            // a pump-action shotgun pumps after every shot that leaves a shell in it
+            // (not when the first person animation has its own pump cues)
+            if (IsPump(w) && w.Ammo > 0 && !(local && viewModelPumps))
+            {
+                // the pump clips start with a short slide, their click comes about 0.08 s in
+                SchedulePump(0.2f, w, "pump_back", 0.55f);
+                SchedulePump(0.4f, w, "pump_forward", 0.65f);
+            }
+        }
+
+        if (damaging) BodyHit(s);
+        else if (s.hit && s.target == null) Play("Impacts/wall", s.end, 0.25f, 20f, false, 1.3f);
+
+        if (byPlayer) BotController.Noise(from, silenced || s.taser ? hearSilencedShot : hearShot, s.shooter);
     }
 
-    // bots only: the player's reload is heard from his first person animation
+    // the sound of a hit on a player: Impacts/body (a meaty flesh hit) or Impacts/head (a helmet "tink" + crack,
+    // the flesh hit is already in it). The player hears his own hits close and without position, at any distance
+    // (a hit confirmation like in CS 2); everybody else's hits are heard at the hit point.
+    // The pellets of one shell come in the same frame: a body is heard once, the head once more if a later pellet
+    // hits the head.
+    void BodyHit(ShotInfo s)
+    {
+        bool same = s.pellet && Time.frameCount == lastHitFrame && s.target == lastHitTarget;
+        if (same && (lastHitHead || !s.headshot)) return;
+        lastHitFrame = Time.frameCount;
+        lastHitTarget = s.target;
+        lastHitHead = s.headshot;
+
+        bool local = IsLocal(s.shooter);
+        if (s.headshot) Play("Impacts/head", s.end, local ? 0.75f : 0.9f, hitRange, local);
+        else Play("Impacts/body", s.end, local ? 0.55f : 0.75f, hitRange, local);
+    }
+
+    // the knife like in CS 2: a swing in the air, a hit on a wall or the floor, a hit on a player
+    // (the right click stab has its own sound when there is one, and a lower swing)
+    void KnifeSound(ShotInfo s, Weapon w, Vector3 from, bool local)
+    {
+        bool stab = s.stab;
+
+        if (s.target != null && s.target != s.shooter)
+        {
+            string clip = stab ? First("Knife/stab", "Knife/body", "Impacts/knife_body") : First("Knife/body", "Impacts/knife_body");
+            Play(clip, s.end, 0.8f, hitRange, false);
+        }
+        else if (s.hit)
+        {
+            Play(First("Knife/wall", "Impacts/knife_wall"), s.end, 0.6f, hitRange, false);
+        }
+        else
+        {
+            Play(First("Knife/air", "Knife/swing"), from, 0.6f, 15f, local, stab ? 0.85f : 1f);
+        }
+    }
+
+    // the first of these clip paths that has clips (the last one if none has, it is silent then)
+    string First(params string[] paths)
+    {
+        for (int i = 0; i < paths.Length - 1; i++)
+            if (Get(paths[i]).Length > 0) return paths[i];
+        return paths[paths.Length - 1];
+    }
+
+    // pump-action shotguns (Nova, MAG-7), the same ones the first person animation pumps;
+    // the Sawed-Off is break-action and the XM1014 semi-automatic
+    static bool IsPump(Weapon w)
+    {
+        if (w == null || !w.IsShotgun) return false;
+        return w.data != null ? ViewModel.IsPumpAction(w.data) : w.fireRate < 2f;
+    }
+
+    void SchedulePump(float delay, Weapon w, string key, float volume)
+    {
+        string clip = ReloadClip(w.data, key, out float pitch);
+        Schedule(delay, clip, w, false, volume, pitch, true);
+    }
+
+    // Weapons/<weapon name>/shot; a weapon without its own clips yet borrows the clips of one of the same kind;
+    // the Zeus stays silent without its own
+    ShotSound ShotSoundOf(Weapon w)
+    {
+        WeaponData d = w != null ? w.data : null;
+        if (d != null && shotSounds.TryGetValue(d, out ShotSound cached)) return cached;
+
+        string name = d != null ? d.weaponName : w != null ? w.weaponName : "";
+        ShotSound s = new ShotSound { clip = "Weapons/" + name + "/shot", pitch = 1f };
+        if (Get(s.clip).Length == 0)
+        {
+            s = StandIn(w);
+            if (s.clip != null && Get(s.clip).Length == 0) s.clip = "Weapons/AK-47/shot";
+        }
+
+        if (d != null) shotSounds[d] = s;
+        return s;
+    }
+
+    // silenced → USP-S, pistols → Glock-18 or Desert Eagle (heavy ones), SMGs → MP9, snipers → AWP,
+    // shotguns → a low Desert Eagle, rifles and machine guns → M4A4 (CT) or AK-47
+    static ShotSound StandIn(Weapon w)
+    {
+        ShotSound s = new ShotSound { clip = null, pitch = 1f };
+        if (w != null && w.IsTaser) return s;
+
+        string name = "AK-47";
+        if (w != null)
+        {
+            WeaponData d = w.data;
+            WeaponCategory category = d != null ? d.category : WeaponCategory.Rifle;
+            if (w.Silenced) name = "USP-S";
+            else if (category == WeaponCategory.Pistol) name = w.damage >= 50f ? "Desert Eagle" : "Glock-18";
+            else if (category == WeaponCategory.SMG) name = "MP9";
+            else if (category == WeaponCategory.Sniper)
+            {
+                name = "AWP";
+                if (!w.BoltAction) s.pitch = 1.12f;
+            }
+            else if (category == WeaponCategory.Shotgun)
+            {
+                name = "Desert Eagle";
+                s.pitch = 0.75f;
+            }
+            else if (d != null && d.team == 1) name = "M4A4";
+        }
+
+        s.clip = "Weapons/" + name + "/shot";
+        return s;
+    }
+
+    // bots only: the player's reload is heard from his first person animation;
+    // a shell-by-shell reload is heard shell by shell (OnShellInserted)
     void OnReload(Weapon w)
     {
-        if (w == null || w.IsMelee || w.Owner == null) return;
+        if (w == null || w.IsMelee || w.IsTaser || w.Owner == null) return;
         if (w.Owner.GetComponent<PlayerController>() != null) return;
+        if (w.IsShellReload) return;
 
         bool pistol = w.data != null && w.data.category == WeaponCategory.Pistol;
-        string action = pistol ? "slide" : "bolt";
+        string action = pistol ? "slide" : w.IsShotgun ? "pump" : "bolt";
         float t = w.reloadTime;
         ScheduleReload(t * 0.18f, w, "mag_out", true, 0.6f);
         ScheduleReload(t * 0.6f, w, "mag_in", true, 0.7f);
         ScheduleReload(t * 0.82f, w, action + "_back", true, 0.55f);
         ScheduleReload(t * 0.9f, w, action + "_forward", true, 0.65f);
+    }
+
+    // shell-by-shell reload (Nova, XM1014, Sawed-Off): a click for every shell that goes in
+    void OnShellInserted(Weapon w)
+    {
+        if (w == null || w.Owner == null || w.Owner.IsDead) return;
+        bool local = IsLocal(w.Owner);
+        if (local && viewModelShells) return;   // the first person animation plays them
+
+        string clip = ReloadClip(w.data, "shell", out float pitch);
+        if (local)
+        {
+            // the first person animation may send its "shell" cue for this same shell right after this event:
+            // the player's shell waits a moment and is dropped then (so the very first shell is not heard twice)
+            Schedule(0f, clip, w, false, ReloadVolume("shell"), pitch, false, true);
+            return;
+        }
+        Play(clip, w.Owner.transform.position, ReloadVolume("shell"), 20f, local, pitch);
     }
 
     void OnEquipped(Weapon w)
@@ -311,14 +545,32 @@ public class GameAudio : MonoBehaviour
         Play("Mech/draw", Vector3.zero, 0.2f, 10f, true, w.IsMelee ? 1.4f : 1f);
     }
 
-    // a sound of the player's first person animation (draw, reload, AWP bolt), always his own, so 2D
+    // a sound of the player's first person animation (draw, reload, bolt), always his own, so 2D
     void OnAnimationSound(string key, WeaponData weapon)
     {
+        if (string.IsNullOrEmpty(key)) return;
+
         if (key == "knife_flip")
         {
             if (Get("Knife/flip").Length > 0) Play("Knife/flip", Vector3.zero, 0.45f, 10f, true);
             else Play("Mech/draw", Vector3.zero, 0.3f, 10f, true, 1.4f);
             return;
+        }
+
+        // an animation with its own pump or shell cues: those are not timed here for the player any more
+        if (key.StartsWith("pump")) viewModelPumps = true;
+        if (key == "shell") viewModelShells = true;
+
+        if (weapon != null && weapon.IsShotgun)
+        {
+            // a shell reload is heard shell by shell, not as a magazine
+            if (weapon.shellReload && (key == "mag_out" || key == "mag_in")) return;
+            // the slide or bolt of a pump gun is its pump (the XM1014 has a charging handle: its own bolt clips)
+            if (!key.StartsWith("pump") && ViewModel.IsPumpAction(weapon))
+            {
+                if (key.EndsWith("_back")) key = "pump_back";
+                else if (key.EndsWith("_forward")) key = "pump_forward";
+            }
         }
 
         string clip = ReloadClip(weapon, key, out float pitch);
@@ -336,7 +588,10 @@ public class GameAudio : MonoBehaviour
             pending.RemoveAt(i);
 
             if (p.weapon == null || p.weapon.Owner == null || p.weapon.Owner.IsDead) continue;
+            if (p.weapon.data != p.data) continue;                           // another weapon is in the hands now
             if (p.onlyWhileReloading && !p.weapon.IsReloading) continue;   // the reload was cancelled
+            if (p.notWhileReloading && p.weapon.IsReloading) continue;     // a reload started (no pump then)
+            if (p.unlessViewModelShells && viewModelShells) continue;      // the animation played this shell
 
             Health owner = p.weapon.Owner;
             Play(p.clip, owner.transform.position, p.volume, 20f, IsLocal(owner), p.pitch);
@@ -455,25 +710,38 @@ public class GameAudio : MonoBehaviour
         return Mathf.Sqrt(Mathf.Max(0f, pc.jumpHeight * -2f * pc.gravity));
     }
 
-    // the push off: a soft scuff and a quiet step on the floor
+    // the push off: a cloth rustle with a light shoe scuff (Movement/jump) and a quiet step of the floor's material
     void Jump(Vector3 p, bool local)
     {
-        Play("Movement/jump", p, 0.7f * footstepVolume, footstepRange, local, 1f, true);
-        Play("Footsteps/" + Surface(p), p, 0.5f * footstepVolume, footstepRange, local, 1.1f, true);
+        Play("Movement/jump", p, 0.75f * footstepVolume, footstepRange, local, 1f, true);
+        Play("Footsteps/" + Surface(p), p, 0.35f * footstepVolume, footstepRange, local, 1.1f, true);
     }
 
-    // the landing: a thud of the body and a loud step on the floor
+    // the landing: the shoes on the floor with the thud of the body (Movement/land) and a step of the floor's material
     void Land(Vector3 p, bool local)
     {
         Play("Movement/land", p, footstepVolume, footstepRange, local, 1f, true);
-        Play("Footsteps/" + Surface(p), p, footstepVolume, footstepRange, local, 0.9f, true);
+        Play("Footsteps/" + Surface(p), p, 0.6f * footstepVolume, footstepRange, local, 0.9f, true);
     }
 
+    static readonly RaycastHit[] floorHits = new RaycastHit[16];
+
     // the floor under the feet: wood, sand or concrete, by the name of its material
+    // (the hitboxes of the character models are not the floor: the nearest collider without a Health below)
     static string Surface(Vector3 p)
     {
-        if (Physics.Raycast(p + Vector3.up * 0.5f, Vector3.down, out RaycastHit hit, 3f))
+        int count = Physics.RaycastNonAlloc(p + Vector3.up * 0.5f, Vector3.down, floorHits, 3f,
+                                            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        int best = -1;
+        for (int i = 0; i < count; i++)
         {
+            if (best >= 0 && floorHits[i].distance >= floorHits[best].distance) continue;
+            if (floorHits[i].collider.GetComponentInParent<Health>() != null) continue;
+            best = i;
+        }
+        if (best >= 0)
+        {
+            RaycastHit hit = floorHits[best];
             Renderer r = hit.collider.GetComponent<Renderer>();
             string n = r != null && r.sharedMaterial != null ? r.sharedMaterial.name.ToLowerInvariant() : "";
             if (n.Contains("wood") || n.Contains("plank")) return "wood";

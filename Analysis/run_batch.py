@@ -31,7 +31,7 @@ PARTS = os.path.join(DATA, "_parts")
 # settings that are passed to the game as "-<key> <value>"
 PARAMS = ["map", "bots", "roundtime", "timescale",
           "stealth0", "stealth1", "penalty", "radius", "reveal",
-          "weapon0", "weapon1", "bhop0", "bhop1", "penetration", "ff", "sneak"]
+          "weapon0", "weapon1", "bhop0", "bhop1", "penetration", "ff", "sneak", "crouch"]
 
 # pairs that are exchanged for the mirrored run
 SWAP = [("stealth0", "stealth1"), ("weapon0", "weapon1"), ("bhop0", "bhop1")]
@@ -159,6 +159,11 @@ def experiment(exe, e, args):
     if unknown:
         print(f"[{name}] unknown settings ignored: {sorted(unknown)}")
     params.setdefault("timescale", args.timescale)
+    # explicit bhop levels, so a series never depends on the value stored in the scene
+    params.setdefault("bhop0", 0)
+    params.setdefault("bhop1", 0)
+    # 5 v 5 unless the experiment says otherwise (the team size saved in a scene can be a test value, e.g. 1)
+    params.setdefault("bots", 5)
 
     a = run(exe, name, rounds, params, args.jobs, args.seed, args.timeout, args.dry_run, args.force)
     if not e.get("swap", False):

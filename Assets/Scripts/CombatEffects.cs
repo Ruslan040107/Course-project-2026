@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+// Shot effects (never in simulations): flashes, tracers, bullet holes, blood, the killfeed and the hit marker.
+// Also the knife scratches on walls and floors, and the empty magazines and shells that fall out of guns
+// (DropPiece / DropShell, called by ViewModel and BotWeaponModels): a copy at real size falls without physics
+// (a ray to the floor every frame), bounces once or twice, lies on its flattest side for a second and shrinks away.
 public class CombatEffects : MonoBehaviour
 {
     [Header("Tracers")]
@@ -14,6 +18,17 @@ public class CombatEffects : MonoBehaviour
     public int decalPool = 80;
     public float decalLifetime = 25f;
     public float decalFadeTime = 4f;
+
+    [Header("Knife scratches")]
+    public int scratchPool = 30;
+    public float scratchLifetime = 20f;
+    public float scratchFadeTime = 4f;
+
+    [Header("Dropped magazines and shells")]
+    [Tooltip("magazines and empty shells in the world at most; the oldest goes first")] public int pieceLimit = 48;
+    [Tooltip("seconds a magazine or a shell lies on the floor, then it shrinks away")] public float pieceLieTime = 1f;
+    public float pieceShrinkTime = 0.25f;
+    [Tooltip("none farther than this from the camera")] public float pieceMaxDistance = 40f;
 
     [Header("Other")]
     public Texture2D headshotIcon;
@@ -36,6 +51,22 @@ public class CombatEffects : MonoBehaviour
         public SpriteRenderer sr;
         public float expire, baseAlpha;
         public bool active;
+    }
+
+    // a magazine or an empty shell that fell out of a gun: a copy of the part at real size, no physics
+    class Piece
+    {
+        public GameObject go;
+        public Transform t;
+        public string key;
+        public Vector3 scale, velocity, spin;
+        public Vector3 center;      // the middle of its meshes (local, unscaled)
+        public Vector3 thinAxis;    // the local axis of its smallest size: it lies on that side
+        public float thinHalf;      // half of that size (local)
+        public float born, landedAt;
+        public int bounces;
+        public bool landed;
+        public Vector3 restPos, contact;   // where it lies, and the point it touches the floor with
     }
 
     class FeedEntry
@@ -70,6 +101,27 @@ public class CombatEffects : MonoBehaviour
     readonly Dictionary<string, Texture2D> weaponIcons = new Dictionary<string, Texture2D>();
     readonly Collider[] overlap = new Collider[8];
 
+    // knife scratches (a pool like the bullet holes), dropped magazines and shells (alive, oldest first; free ones by kind)
+    readonly List<Decal> scratches = new List<Decal>();
+    readonly List<Piece> pieces = new List<Piece>();
+    readonly Dictionary<string, Stack<Piece>> freePieces = new Dictionary<string, Stack<Piece>>();
+    readonly Dictionary<string, Material> pieceMaterials = new Dictionary<string, Material>();
+    readonly RaycastHit[] pieceHits = new RaycastHit[16];
+    readonly List<GameObject> removeBuffer = new List<GameObject>();
+    GameObject[] shellTemplates;
+    Sprite[] slashSprites;
+    Sprite stabSprite;
+    int nextScratch;
+
+    // the effects of this scene (null in simulations: there CombatEffects is switched off)
+    static CombatEffects instance;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetStatics()
+    {
+        instance = null;
+    }
+
     int nextTracer, nextDecal;
     bool subscribed;
     Sprite holeSprite, bloodSprite;
@@ -99,6 +151,7 @@ public class CombatEffects : MonoBehaviour
 
     void OnDestroy()
     {
+        if (instance == this) instance = null;
         RoundManager.RoundStarted -= ClearDecals;
         if (!subscribed) return;
         Weapon.AnyShot -= OnShot;
@@ -154,6 +207,23 @@ public class CombatEffects : MonoBehaviour
 
             decals.Add(new Decal { sr = sr });
         }
+
+        // knife scratches: three looks for a slash, one for a stab
+        slashSprites = new Sprite[3];
+        for (int i = 0; i < slashSprites.Length; i++)
+            slashSprites[i] = MakeSprite(MakeScratchTexture(256, 80, 17 + i * 31, false));
+        stabSprite = MakeSprite(MakeScratchTexture(128, 48, 5, true));
+        for (int i = 0; i < scratchPool; i++)
+        {
+            GameObject go = new GameObject("Scratch");
+            go.transform.SetParent(transform, false);
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            sr.enabled = false;
+
+            scratches.Add(new Decal { sr = sr });
+        }
+        instance = this;
 
         GameObject lightGo = new GameObject("MuzzleFlashLight");
         lightGo.transform.SetParent(transform, false);
@@ -242,9 +312,10 @@ public class CombatEffects : MonoBehaviour
 
         bool byPlayer = s.shooter != null && s.shooter.GetComponent<PlayerController>() != null;
 
-        // the player's shots start at the muzzle of the weapon model, it draws its own flash
+        // the shots of the player (and of the teammate he watches) start at the muzzle of the first person model,
+        // it draws its own flash
         Vector3 modelMuzzle = Vector3.zero;
-        bool fromModel = byPlayer && ViewModel.TryGetMuzzle(s.shooter, out modelMuzzle);
+        bool fromModel = ViewModel.TryGetMuzzle(s.shooter, out modelMuzzle);
         Vector3 muzzlePos = s.muzzle.position;
         if (fromModel)
             muzzlePos = modelMuzzle;
@@ -261,10 +332,17 @@ public class CombatEffects : MonoBehaviour
             float dist = toEnd.magnitude;
             if (dist > 1f) SpawnTracer(muzzlePos, toEnd / dist, dist);
 
-            if (!fromModel) Burst(flashFx, muzzlePos, s.muzzle.forward, 2);
-            flashLight.transform.position = muzzlePos;
-            flashLight.enabled = true;
-            flashTimer = 0.05f;
+            // one flash for a shotgun shell (the other pellets only have tracers), a small one for a silenced shot
+            if (!s.pellet)
+            {
+                if (!fromModel) Burst(flashFx, muzzlePos, s.muzzle.forward, s.silenced ? 1 : 2);
+                if (!s.silenced)
+                {
+                    flashLight.transform.position = muzzlePos;
+                    flashLight.enabled = true;
+                    flashTimer = 0.05f;
+                }
+            }
         }
 
         if (!s.hit) return;
@@ -273,12 +351,18 @@ public class CombatEffects : MonoBehaviour
         bool damaging = s.target != null && s.target != s.shooter &&
                         (s.shooter == null || s.target.team != s.shooter.team || Weapon.FriendlyFire);
 
-        if (s.melee && !damaging) return;
+        if (s.melee && !damaging)
+        {
+            // the blade scratched a wall or the floor
+            if (s.target == null) SpawnScratch(s);
+            return;
+        }
 
         if (damaging)
         {
-            Burst(bloodFx, s.end, s.normal, 14);
-            SpawnFloorBlood(s.target.transform.position, 0.3f);
+            // the pellets of one shell: less blood each and one stain on the floor
+            Burst(bloodFx, s.end, s.normal, s.pellet ? 6 : 14);
+            if (!s.pellet) SpawnFloorBlood(s.target.transform.position, 0.3f);
 
             if (byPlayer)
             {
@@ -423,9 +507,21 @@ public class CombatEffects : MonoBehaviour
     void SpawnFloorBlood(Vector3 pos, float size)
     {
         Vector3 origin = pos + new Vector3(Random.Range(-0.3f, 0.3f), 0f, Random.Range(-0.3f, 0.3f));
-        if (Physics.Raycast(origin, Vector3.down, out RaycastHit fh, 4f))
-            SpawnDecal(bloodSprite, fh.point, fh.normal, size * Random.Range(0.8f, 1.3f), new Color(1f, 1f, 1f, 0.85f));
+
+        // the nearest floor below; the hitboxes of the character models (legs) are not the floor
+        int n = Physics.RaycastNonAlloc(origin, Vector3.down, floorHits, 4f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        int best = -1;
+        for (int i = 0; i < n; i++)
+        {
+            if (best >= 0 && floorHits[i].distance >= floorHits[best].distance) continue;
+            if (floorHits[i].collider.GetComponentInParent<Health>() != null) continue;
+            best = i;
+        }
+        if (best >= 0)
+            SpawnDecal(bloodSprite, floorHits[best].point, floorHits[best].normal, size * Random.Range(0.8f, 1.3f), new Color(1f, 1f, 1f, 0.85f));
     }
+
+    readonly RaycastHit[] floorHits = new RaycastHit[16];
 
     void SpawnDecal(Sprite sprite, Vector3 point, Vector3 normal, float size, Color color)
     {
@@ -470,7 +566,21 @@ public class CombatEffects : MonoBehaviour
             t.line.SetPosition(1, t.start + t.dir * head);
         }
 
-        foreach (Decal d in decals)
+        FadeDecals(decals, decalFadeTime);
+        FadeDecals(scratches, scratchFadeTime);
+        UpdatePieces(dt);
+
+        if (flashTimer > 0f)
+        {
+            flashTimer -= dt;
+            if (flashTimer <= 0f) flashLight.enabled = false;
+        }
+    }
+
+    // decals fade out in their last seconds, then they are free again
+    static void FadeDecals(List<Decal> list, float fadeTime)
+    {
+        foreach (Decal d in list)
         {
             if (!d.active) continue;
 
@@ -482,19 +592,462 @@ public class CombatEffects : MonoBehaviour
                 continue;
             }
 
-            if (left < decalFadeTime)
+            if (left < fadeTime)
             {
                 Color c = d.sr.color;
-                c.a = d.baseAlpha * (left / decalFadeTime);
+                c.a = d.baseAlpha * (left / fadeTime);
                 d.sr.color = c;
             }
         }
+    }
 
-        if (flashTimer > 0f)
+    // ---------------- knife scratches ----------------
+
+    // the knife hit a wall or the floor: thin bright scratches along the swing (a slash goes across, left to right),
+    // a stab leaves a short gouge
+    void SpawnScratch(ShotInfo s)
+    {
+        if (scratches.Count == 0) return;
+
+        // the knife's sphere may touch the surface off the line of the blow: the surface on that line, if it is there
+        Vector3 point = s.end;
+        Vector3 normal = s.normal;
+        Vector3 line = s.end - s.origin;
+        float length = line.magnitude;
+        if (length > 0.01f && SurfaceHit(s.origin, line / length, length + 0.3f, out RaycastHit exact) &&
+            (exact.point - s.end).sqrMagnitude < 0.3f * 0.3f)
         {
-            flashTimer -= dt;
-            if (flashTimer <= 0f) flashLight.enabled = false;
+            point = exact.point;
+            normal = exact.normal;
         }
+        if (normal.sqrMagnitude < 0.25f) return;
+        normal.Normalize();
+
+        // the direction of the cut on the surface: a slash across the view, a stab along the blade (up), on the floor forward
+        Transform from = s.muzzle;
+        Vector3 right = from != null ? from.right : Vector3.right;
+        Vector3 up = from != null ? from.up : Vector3.up;
+        Vector3 forward = from != null ? from.forward : (length > 0.01f ? line / length : Vector3.forward);
+        Vector3 along = Vector3.ProjectOnPlane(s.stab ? up : right, normal);
+        if (along.sqrMagnitude < 0.09f) along = Vector3.ProjectOnPlane(forward, normal);
+        if (along.sqrMagnitude < 1e-4f) along = Vector3.ProjectOnPlane(Vector3.right, normal);
+        if (along.sqrMagnitude < 1e-4f) along = Vector3.ProjectOnPlane(Vector3.forward, normal);
+        along.Normalize();
+        // a slash runs a little down, never twice the same way
+        along = Quaternion.AngleAxis(s.stab ? Random.Range(-10f, 10f) : Random.Range(-25f, 12f), normal) * along;
+
+        Decal d = scratches[nextScratch];
+        nextScratch = (nextScratch + 1) % scratches.Count;
+
+        SpriteRenderer sr = d.sr;
+        sr.sprite = s.stab ? stabSprite : slashSprites[Random.Range(0, slashSprites.Length)];
+        sr.color = Color.white;
+        sr.flipX = Random.value < 0.5f;
+        sr.flipY = Random.value < 0.5f;
+
+        // the sprite's x goes along the cut, it lies on the surface
+        Transform t = sr.transform;
+        t.position = point + normal * 0.012f;
+        t.rotation = Quaternion.LookRotation(-normal, Vector3.Cross(-normal, along));
+        t.localScale = Vector3.one * (s.stab ? Random.Range(0.08f, 0.1f) : Random.Range(0.3f, 0.38f));
+
+        sr.enabled = true;
+        d.active = true;
+        d.expire = Time.time + scratchLifetime;
+        d.baseAlpha = 1f;
+    }
+
+    // 2-3 thin bright metal scratches with dark edges along x, thin at both ends;
+    // a stab: one short deep gouge, dark inside with a bright rim
+    static Texture2D MakeScratchTexture(int w, int h, int seed, bool stab)
+    {
+        System.Random rng = new System.Random(seed);
+        Color[] px = new Color[w * h];
+        int count = stab ? 1 : 2 + rng.Next(2);
+
+        for (int s = 0; s < count; s++)
+        {
+            float x0 = w * (stab ? 0.1f : 0.02f + 0.16f * (float)rng.NextDouble());
+            float x1 = w * (stab ? 0.9f : 0.8f + 0.18f * (float)rng.NextDouble());
+            float y0 = h * 0.5f + (s - (count - 1) * 0.5f) * h * 0.21f + ((float)rng.NextDouble() - 0.5f) * h * 0.08f;
+            float slope = ((float)rng.NextDouble() - 0.5f) * h * 0.14f;
+            float bend = ((float)rng.NextDouble() - 0.5f) * h * 0.12f;
+            float core = stab ? h * 0.15f : 0.8f + 1.1f * (float)rng.NextDouble();   // half width, pixels
+            float edge = stab ? 1.8f : 1.3f + 0.9f * (float)rng.NextDouble();
+            float noiseSeed = (float)rng.NextDouble() * 50f;
+
+            int xa = Mathf.Max(0, Mathf.FloorToInt(x0)), xb = Mathf.Min(w - 1, Mathf.CeilToInt(x1));
+            for (int x = xa; x <= xb; x++)
+            {
+                float t = Mathf.Clamp01((x + 0.5f - x0) / Mathf.Max(1f, x1 - x0));
+                float taper = Mathf.Pow(Mathf.Sin(t * Mathf.PI), stab ? 0.6f : 0.35f);
+                float yc = y0 + slope * (t - 0.5f) * 2f + bend * Mathf.Sin(t * Mathf.PI);
+                float half = core * taper;
+                float outer = half + edge * Mathf.Max(taper, 0.4f);
+                // the blade pressed harder in some places
+                float n = Mathf.PerlinNoise(noiseSeed + x * 0.07f, s * 3.7f);
+                float strength = Mathf.Clamp01(taper * 1.6f) * (stab ? 1f : Mathf.Lerp(0.55f, 1f, n));
+
+                int ya = Mathf.Max(0, Mathf.FloorToInt(yc - outer - 1f)), yb = Mathf.Min(h - 1, Mathf.CeilToInt(yc + outer + 1f));
+                for (int y = ya; y <= yb; y++)
+                {
+                    float d = Mathf.Abs(y + 0.5f - yc);
+                    int i = y * w + x;
+                    if (d < half + 0.5f)
+                    {
+                        // the scratch: bright bare metal (the gouge is dark inside, its rim catches the light)
+                        float a = Mathf.Clamp01(half + 0.5f - d) * strength;
+                        float b = 0.78f + 0.2f * n;
+                        Color col = new Color(b, b, b + 0.03f, 1f);
+                        if (stab && d < half * 0.6f) col = new Color(0.04f, 0.035f, 0.03f, 1f);
+                        col.a = a;
+                        px[i] = Over(col, px[i]);
+                    }
+                    else if (d < outer + 0.5f)
+                    {
+                        // the dark torn edges, under the bright metal of another scratch
+                        float a = 0.7f * Mathf.Clamp01(outer + 0.5f - d) * strength;
+                        px[i] = Over(px[i], new Color(0.05f, 0.045f, 0.04f, a));
+                    }
+                }
+            }
+        }
+
+        Texture2D tex = new Texture2D(w, h, TextureFormat.RGBA32, true);
+        tex.wrapMode = TextureWrapMode.Clamp;
+        tex.anisoLevel = 4;
+        tex.SetPixels(px);
+        tex.Apply(true);
+        return tex;
+    }
+
+    // a over b (straight alpha)
+    static Color Over(Color a, Color b)
+    {
+        float outA = a.a + b.a * (1f - a.a);
+        if (outA <= 1e-5f) return new Color(0f, 0f, 0f, 0f);
+        Color c = (a * a.a + b * b.a * (1f - a.a)) / outA;
+        c.a = outA;
+        return c;
+    }
+
+    // ---------------- dropped magazines and shells ----------------
+
+    // A part of a gun falls out (an empty magazine): a copy of source (its meshes) at this position, rotation and world
+    // scale is thrown with this velocity and spin (degrees per second). from: a point it surely did not come through a
+    // wall from (the eye for a first person model). key: the same key = the same meshes (pooled copies are reused).
+    // Returns false when there are no effects (simulation, no CombatEffects in the scene).
+    public static bool DropPiece(GameObject source, string key, Vector3 position, Quaternion rotation, Vector3 scale,
+                                 Vector3 velocity, Vector3 spin, Vector3 from)
+    {
+        CombatEffects fx = instance;
+        if (fx == null || !fx.isActiveAndEnabled || source == null) return false;
+        return fx.Drop(source, key, position, rotation, scale, velocity, spin, from);
+    }
+
+    // An empty shell of this weapon: a pistol, rifle or sniper case, or a red shotgun hull; real size, its long axis is
+    // the rotation's up. Same as DropPiece otherwise.
+    public static bool DropShell(WeaponData weapon, Vector3 position, Quaternion rotation, Vector3 velocity, Vector3 spin, Vector3 from)
+    {
+        CombatEffects fx = instance;
+        if (fx == null || !fx.isActiveAndEnabled) return false;
+        int kind = ShellKind(weapon);
+        return fx.Drop(fx.ShellTemplate(kind), "shell" + kind, position, rotation, Vector3.one, velocity, spin, from);
+    }
+
+    // 0 pistol and SMG rounds, 1 rifle, 2 sniper, 3 shotgun hull
+    static int ShellKind(WeaponData d)
+    {
+        if (d == null) return 1;
+        if (d.IsShotgun || d.category == WeaponCategory.Shotgun) return 3;
+        if (d.category == WeaponCategory.Pistol || d.category == WeaponCategory.SMG) return 0;
+        if (d.category == WeaponCategory.Sniper) return 2;
+        return 1;
+    }
+
+    bool Drop(GameObject source, string key, Vector3 position, Quaternion rotation, Vector3 scale, Vector3 velocity, Vector3 spin, Vector3 from)
+    {
+        if (source == null) return false;
+        Camera cam = Camera.main;
+        if (cam != null && (position - cam.transform.position).sqrMagnitude > pieceMaxDistance * pieceMaxDistance) return true;
+
+        // it must not start behind a wall
+        Vector3 path = position - from;
+        float length = path.magnitude;
+        if (length > 0.01f && SurfaceHit(from, path / length, length, out RaycastHit wall))
+            position = wall.point + wall.normal * 0.03f;
+
+        while (pieces.Count >= Mathf.Max(1, pieceLimit)) Recycle(0);
+
+        Piece p = null;
+        if (freePieces.TryGetValue(key, out Stack<Piece> free))
+        {
+            while (p == null && free.Count > 0)
+            {
+                p = free.Pop();
+                if (p.go == null) p = null;
+            }
+        }
+        if (p == null) p = NewPiece(source, key);
+
+        p.t.SetPositionAndRotation(position, rotation);
+        p.t.localScale = scale;
+        p.scale = scale;
+        p.velocity = velocity;
+        p.spin = spin;
+        p.born = Time.time;
+        p.bounces = 0;
+        p.landed = false;
+        p.go.SetActive(true);
+        pieces.Add(p);
+        return true;
+    }
+
+    // a copy of a gun part: only its meshes, on the default layer, with shadows; its size is measured once
+    Piece NewPiece(GameObject source, string key)
+    {
+        GameObject go = Instantiate(source);
+        go.name = "Dropped " + source.name;
+        Transform t = go.transform;
+        t.SetParent(null, false);
+        t.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        t.localScale = Vector3.one;
+
+        foreach (Collider c in go.GetComponentsInChildren<Collider>(true)) DestroyImmediate(c);
+        foreach (MonoBehaviour b in go.GetComponentsInChildren<MonoBehaviour>(true)) Destroy(b);
+        removeBuffer.Clear();
+        foreach (Renderer r in go.GetComponentsInChildren<Renderer>(true))
+        {
+            // the shadow-only copies CharacterBody adds to the model the camera is in
+            if (r.shadowCastingMode == UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly && r.gameObject != go)
+            {
+                removeBuffer.Add(r.gameObject);
+                continue;
+            }
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            r.receiveShadows = true;
+            r.enabled = true;
+        }
+        foreach (GameObject g in removeBuffer) DestroyImmediate(g);
+        removeBuffer.Clear();
+        foreach (Transform c in go.GetComponentsInChildren<Transform>(true)) c.gameObject.layer = 0;
+
+        Piece p = new Piece { go = go, t = t, key = key };
+        bool any = false;
+        Bounds bounds = new Bounds();
+        foreach (MeshFilter mf in go.GetComponentsInChildren<MeshFilter>(true))
+        {
+            if (mf.sharedMesh == null) continue;
+            Bounds mb = mf.sharedMesh.bounds;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 corner = mb.center + Vector3.Scale(mb.extents,
+                    new Vector3((i & 1) == 0 ? -1f : 1f, (i & 2) == 0 ? -1f : 1f, (i & 4) == 0 ? -1f : 1f));
+                Vector3 q = t.InverseTransformPoint(mf.transform.TransformPoint(corner));
+                if (any) bounds.Encapsulate(q);
+                else bounds = new Bounds(q, Vector3.zero);
+                any = true;
+            }
+        }
+        Vector3 size = any ? bounds.size : Vector3.one * 0.02f;
+        p.center = any ? bounds.center : Vector3.zero;
+        int axis = size.x <= size.y && size.x <= size.z ? 0 : size.y <= size.z ? 1 : 2;
+        p.thinAxis = axis == 0 ? Vector3.right : axis == 1 ? Vector3.up : Vector3.forward;
+        p.thinHalf = Mathf.Max(0.001f, size[axis] * 0.5f);
+
+        go.SetActive(false);
+        return p;
+    }
+
+    void UpdatePieces(float dt)
+    {
+        if (dt <= 0f || pieces.Count == 0) return;
+        float now = Time.time;
+        for (int i = pieces.Count - 1; i >= 0; i--)
+        {
+            Piece p = pieces[i];
+            if (p.go == null)
+            {
+                pieces.RemoveAt(i);
+                continue;
+            }
+
+            if (!p.landed)
+            {
+                // fell out of the map, or never found a floor
+                if (now - p.born > 5f) Recycle(i);
+                else Fly(p, dt);
+                continue;
+            }
+
+            // lies for a moment, then shrinks to the point it touches the floor with
+            float shrink = (now - p.landedAt - pieceLieTime) / Mathf.Max(pieceShrinkTime, 0.01f);
+            if (shrink <= 0f) continue;
+            if (shrink >= 1f)
+            {
+                Recycle(i);
+                continue;
+            }
+            float k = 1f - shrink;
+            p.t.position = p.contact + (p.restPos - p.contact) * k;
+            p.t.localScale = p.scale * k;
+        }
+    }
+
+    // one frame of the fall: gravity, a ray along the way; it bounces off walls and the floor and settles on the floor
+    void Fly(Piece p, float dt)
+    {
+        p.velocity += Physics.gravity * dt;
+        Vector3 step = p.velocity * dt;
+        float distance = step.magnitude;
+        Vector3 offset = p.t.rotation * Vector3.Scale(p.center, p.scale);
+        float radius = ThinHalf(p);
+
+        if (distance > 1e-6f && SurfaceHit(p.t.position + offset, step / distance, distance + radius, out RaycastHit hit))
+        {
+            Vector3 n = hit.normal;
+            float into = -Vector3.Dot(p.velocity, n);
+            if (n.y > 0.55f && (p.bounces >= 2 || into < 1.5f))
+            {
+                Land(p, hit.point, n);
+                return;
+            }
+
+            // a bounce: most of the speed into the surface is lost, some along it
+            Vector3 normalPart = Vector3.Dot(p.velocity, n) * n;
+            p.velocity = (p.velocity - normalPart) * 0.55f - normalPart * 0.3f;
+            p.spin *= 0.5f;
+            p.bounces++;
+            p.t.position = hit.point + n * radius - offset;
+            // stuck in a corner: it lies down where it is
+            if (p.bounces > 6) Land(p, hit.point, n.y > 0.3f ? n : Vector3.up);
+            return;
+        }
+
+        p.t.position += step;
+        p.t.rotation = Quaternion.Euler(p.spin * dt) * p.t.rotation;
+    }
+
+    // it falls onto its flattest side
+    void Land(Piece p, Vector3 point, Vector3 normal)
+    {
+        Vector3 axis = p.t.rotation * Vector3.Scale(p.thinAxis, p.scale);
+        if (Vector3.Dot(axis, normal) < 0f) axis = -axis;
+        Quaternion rot = axis.sqrMagnitude > 1e-12f ? Quaternion.FromToRotation(axis.normalized, normal) * p.t.rotation : p.t.rotation;
+
+        p.t.rotation = rot;
+        p.contact = point;
+        p.restPos = point + normal * ThinHalf(p) - rot * Vector3.Scale(p.center, p.scale);
+        p.t.position = p.restPos;
+        p.velocity = Vector3.zero;
+        p.landed = true;
+        p.landedAt = Time.time;
+    }
+
+    // half of its smallest size in the world
+    static float ThinHalf(Piece p)
+    {
+        return p.thinHalf * Mathf.Abs(Vector3.Dot(p.thinAxis, p.scale));
+    }
+
+    // the nearest surface along the ray; players, bots and their hitboxes are not surfaces
+    bool SurfaceHit(Vector3 origin, Vector3 dir, float distance, out RaycastHit best)
+    {
+        best = default;
+        int n = Physics.RaycastNonAlloc(origin, dir, pieceHits, distance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        bool found = false;
+        for (int i = 0; i < n; i++)
+        {
+            if (found && pieceHits[i].distance >= best.distance) continue;
+            if (pieceHits[i].collider.GetComponentInParent<Health>() != null) continue;
+            best = pieceHits[i];
+            found = true;
+        }
+        return found;
+    }
+
+    void Recycle(int i)
+    {
+        Piece p = pieces[i];
+        pieces.RemoveAt(i);
+        if (p.go == null) return;
+
+        p.go.SetActive(false);
+        if (!freePieces.TryGetValue(p.key, out Stack<Piece> free))
+        {
+            free = new Stack<Piece>();
+            freePieces[p.key] = free;
+        }
+        // shells come often, magazines of one gun rarely
+        int keep = p.key.StartsWith("shell") ? 24 : 4;
+        if (free.Count < keep) free.Push(p);
+        else Destroy(p.go);
+    }
+
+    void ClearPieces()
+    {
+        while (pieces.Count > 0) Recycle(pieces.Count - 1);
+    }
+
+    // cartridge cases at real size along their local up (meters); a shotgun hull is red with a brass head
+    GameObject ShellTemplate(int kind)
+    {
+        if (shellTemplates == null) shellTemplates = new GameObject[4];
+        if (shellTemplates[kind] != null) return shellTemplates[kind];
+
+        GameObject root = new GameObject("Shell template " + kind);
+        root.transform.SetParent(transform, false);
+        root.SetActive(false);
+
+        Material brass = PieceMaterial("Brass", new Color(0.78f, 0.58f, 0.24f), 1f, 0.75f);
+        switch (kind)
+        {
+            case 0:
+                ShellPart(root.transform, Vector3.zero, 0.0099f, 0.019f, brass);    // 9 mm
+                break;
+            case 1:
+                ShellPart(root.transform, Vector3.zero, 0.0112f, 0.045f, brass);    // 5.56 / 7.62
+                break;
+            case 2:
+                ShellPart(root.transform, Vector3.zero, 0.0149f, 0.069f, brass);    // .338
+                break;
+            default:
+                Material hull = PieceMaterial("Hull", new Color(0.62f, 0.07f, 0.05f), 0f, 0.45f);
+                ShellPart(root.transform, new Vector3(0f, 0.006f, 0f), 0.0203f, 0.058f, hull);   // 12 gauge
+                ShellPart(root.transform, new Vector3(0f, -0.029f, 0f), 0.0212f, 0.012f, brass);
+                break;
+        }
+        shellTemplates[kind] = root;
+        return root;
+    }
+
+    // a cylinder along y (Unity's cylinder is 2 units tall, radius 0.5)
+    static void ShellPart(Transform parent, Vector3 pos, float diameter, float length, Material mat)
+    {
+        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        DestroyImmediate(go.GetComponent<Collider>());
+        go.name = "Case";
+        Transform t = go.transform;
+        t.SetParent(parent, false);
+        t.localPosition = pos;
+        t.localScale = new Vector3(diameter, length * 0.5f, diameter);
+        go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+    }
+
+    Material PieceMaterial(string key, Color color, float metallic, float smoothness)
+    {
+        if (pieceMaterials.TryGetValue(key, out Material m) && m != null) return m;
+
+        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null) shader = Shader.Find("Standard");
+        m = new Material(shader) { name = key };
+        m.color = color;
+        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", color);
+        if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", metallic);
+        if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", smoothness);
+        if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", smoothness);
+        pieceMaterials[key] = m;
+        return m;
     }
 
     static Color TeamColor(int team)
@@ -511,6 +1064,12 @@ public class CombatEffects : MonoBehaviour
             d.sr.enabled = false;
             d.active = false;
         }
+        foreach (Decal d in scratches)
+        {
+            d.sr.enabled = false;
+            d.active = false;
+        }
+        ClearPieces();
         feed.Clear();
     }
 

@@ -3,13 +3,22 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 // CS2-like HUD of the human player (IMGUI). Sizes scale with the screen height (made for 1080p).
-// - Bottom left: health with a cross (red below 25) and, with the bhop upgrade, the speed bonus.
-// - Bottom right: ammo, weapon name and the reload bar. PlayerLoadout draws the weapon slots above it
-//   for a moment after a switch. While the dead player watches a teammate, that teammate's health and ammo are shown.
-// - Top centre: round timer, team scores (T red on the left, CT blue on the right), one square per player
-//   (bright = alive, dark = dead), the round message under it, "SOLO" in solo mode.
-// - Centre: a dynamic crosshair (the gap shows the real spread of the next shot) and red arcs pointing
-//   at whoever has just hurt the player.
+// - Bottom left: health with a cross (red below 25) and, with the bhop upgrade, the speed bonus;
+//   above them the money ("$ 800", only with the economy on) with "+$300  Убийство противника" popups
+//   (Economy.MoneyChanged) and the buy hint "B закупка 0:15" while Economy.CanBuy (always in solo);
+//   in the buy time outside the own buy zone a dim "вне зоны закупки" instead.
+// - Bottom right: ammo (shotgun shells are just the number), weapon name and the reload bar; the fire mode
+//   of the Glock-18 / FAMAS ("ОЧЕРЕДЬ" / "АВТО" / "ПОЛУАВТО"), the charge bar of the Zeus. PlayerLoadout draws
+//   the weapon slots above it for a moment after a switch. While the dead player watches a teammate,
+//   that teammate's health and ammo are shown.
+// - Top centre: round timer (in the freeze time at the round start: the freeze seconds, blue), team scores
+//   (T red on the left, CT blue on the right), one square per player (bright = alive, dark = dead), the round
+//   message under it, "SOLO" in solo mode; under them a small "Боты заморожены" tag (RoundManager.BotsFrozen)
+//   and the "Смена сторон" banner for a few seconds after RoundManager.Halftime.
+// - Upper middle, in the freeze time: "Раунд начнётся через 3" (RoundManager.InFreezeTime / FreezeTimeLeft).
+// - Centre: the crosshair of the settings (style, gap, thickness, length, outline; the dynamic one opens up
+//   with the spread of the next shot), red arcs pointing at whoever has just hurt the player,
+//   a short note when the fire mode is switched.
 // While it runs, the old labels of Health, Bhop, RoundManager and PlayerHud are off and the canvas crosshair is hidden.
 // It adds itself to every scene with a player, never in simulations. Nothing is drawn while a menu pauses the game.
 public class GameHud : MonoBehaviour
@@ -27,11 +36,8 @@ public class GameHud : MonoBehaviour
     // y of the top edge of the bottom boxes, in screen pixels
     public static float BottomBoxTop => Screen.height - (Margin + BoxHeight) * Scale;
 
-    [Header("Crosshair (pixels at 1080p, before the size setting)")]
-    public float crosshairLength = 10f;
-    public float crosshairThickness = 2f;
-    public float crosshairBaseGap = 4f;
-    [Tooltip("extra gap for every shot, it closes again quickly")] public float shotBloom = 4f;
+    [Header("Dynamic crosshair (the shape itself is in the settings, see GameSettings)")]
+    [Tooltip("extra gap for every shot, pixels at 1080p, it closes again quickly")] public float shotBloom = 4f;
     public float maxShotBloom = 14f;
     [Tooltip("pixels per second")] public float bloomRecovery = 45f;
 
@@ -45,6 +51,14 @@ public class GameHud : MonoBehaviour
     public Color lowColor = new Color(1f, 0.25f, 0.2f);
     public Color bhopColor = new Color(1f, 0.72f, 0.25f);
     public Color reloadColor = new Color(1f, 0.85f, 0.4f);
+    public Color moneyColor = new Color(0.45f, 0.9f, 0.4f);
+    public Color freezeColor = new Color(0.55f, 0.85f, 1f);
+
+    [Header("Money")]
+    [Tooltip("seconds a '+$300' popup stays")] public float moneyPopupTime = 2.5f;
+
+    [Header("Round start / halftime")]
+    [Tooltip("seconds the 'Смена сторон' banner stays")] public float halftimeBannerTime = 4f;
 
     public static readonly Color PanelColor = new Color(0.03f, 0.04f, 0.05f, 0.7f);
     public static readonly Color DimText = new Color(1f, 1f, 1f, 0.6f);
@@ -99,6 +113,35 @@ public class GameHud : MonoBehaviour
     int bhopPercent = -1;
     string bhopPercentText = "";
 
+    // money: the shown sum, a short flash after a change and the "+$300 убийство" popups
+    struct MoneyPopup
+    {
+        public string text;
+        public bool gain;
+        public float time;
+    }
+    readonly List<MoneyPopup> moneyPopups = new List<MoneyPopup>();
+    int moneyShown = -1;
+    string moneyText = "";
+    float moneyFlashTime = -10f;
+    bool moneyFlashGain;
+    int buySeconds = -1;
+    string buyText = "";
+
+    // the fire mode note in the middle after a right click on the Glock-18 / FAMAS
+    float modeSwitchTime = -10f;
+    string modeSwitchText = "";
+    int chargeSeconds = -1;
+    string chargeText = "";
+
+    // freeze time countdown and the halftime banner
+    int freezeSeconds = -1;
+    string freezeText = "";
+    float halftimeTime = -100f;
+    int halftimeTeam = -1;
+
+    GUIStyle tinyStyle, keyStyle, hugeStyle;
+
     // ---------------- bootstrap ----------------
 
     // Play mode starts without a domain reload: no flags left over from the last play in the editor
@@ -107,6 +150,12 @@ public class GameHud : MonoBehaviour
     {
         instance = null;
         SetDrawing(false);
+        // the ring textures of the last play are not saved with anything: free them
+        for (int i = 0; i < ringSlots.Length; i++)
+        {
+            if (ringSlots[i] != null && ringSlots[i].tex != null) DestroyImmediate(ringSlots[i].tex);
+            ringSlots[i] = null;
+        }
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -168,13 +217,19 @@ public class GameHud : MonoBehaviour
         if (instance != this) return;
         SetDrawing(true);
         Weapon.AnyShot += OnShot;
+        Weapon.AnyModeSwitched += OnModeSwitched;
         RoundManager.RoundStarted += OnRoundStarted;
+        RoundManager.Halftime += OnHalftime;
+        Economy.MoneyChanged += OnMoneyChanged;
     }
 
     void OnDisable()
     {
         Weapon.AnyShot -= OnShot;
+        Weapon.AnyModeSwitched -= OnModeSwitched;
         RoundManager.RoundStarted -= OnRoundStarted;
+        RoundManager.Halftime -= OnHalftime;
+        Economy.MoneyChanged -= OnMoneyChanged;
         if (instance == this) SetDrawing(false);
     }
 
@@ -241,6 +296,9 @@ public class GameHud : MonoBehaviour
 
         bloom = Mathf.MoveTowards(bloom, 0f, bloomRecovery * Time.deltaTime);
 
+        for (int i = moneyPopups.Count - 1; i >= 0; i--)
+            if (Time.time - moneyPopups[i].time > moneyPopupTime) moneyPopups.RemoveAt(i);
+
         if (player == null) return;
         if (weapon == null) weapon = FindPlayerWeapon();
         // RoundManager adds the Bhop component at the first spawn if the player has none
@@ -262,15 +320,48 @@ public class GameHud : MonoBehaviour
 
     void OnShot(ShotInfo s)
     {
-        if (health == null || s.shooter != health || s.melee) return;
+        // one shotgun shell opens the crosshair once, not once per pellet
+        if (health == null || s.shooter != health || s.melee || s.pellet) return;
         float r = Mathf.Clamp(s.recoil > 0f ? s.recoil : 1f, 0.5f, 2f);
         bloom = Mathf.Min(bloom + shotBloom * r, maxShotBloom);
+    }
+
+    // right click on the Glock-18 / FAMAS: a note under the crosshair for a moment
+    void OnModeSwitched(Weapon w)
+    {
+        if (w == null || w != weapon) return;
+        modeSwitchTime = Time.time;
+        modeSwitchText = w.BurstMode ? "Режим: очередь" : w.automatic ? "Режим: автоматический" : "Режим: одиночный";
+    }
+
+    void OnMoneyChanged(Health h, int change, string reason)
+    {
+        if (h == null || h != health || change == 0) return;
+
+        string what = Economy.ReasonText(reason);
+        string sum = (change > 0 ? "+$" : "−$") + Mathf.Abs(change);
+        if (moneyPopups.Count >= 5) moneyPopups.RemoveAt(0);
+        moneyPopups.Add(new MoneyPopup
+        {
+            text = what.Length > 0 ? sum + "  " + what : sum,
+            gain = change > 0,
+            time = Time.time
+        });
+        moneyFlashTime = Time.time;
+        moneyFlashGain = change > 0;
     }
 
     void OnRoundStarted()
     {
         arcs.Clear();
         bloom = 0f;
+    }
+
+    // the teams have swapped sides: the banner tells the player his new side (Health.team is already the new one)
+    void OnHalftime()
+    {
+        halftimeTime = Time.time;
+        halftimeTeam = health != null ? health.team : -1;
     }
 
     void OnDamageTaken(float amount, Health attacker, bool headshot)
@@ -310,12 +401,15 @@ public class GameHud : MonoBehaviour
         BuildStyles(k);
 
         bool dead = health != null && health.IsDead;
+        // the top of the boxes at the bottom left: the money goes above them
+        float leftTop = BottomBoxTop;
 
         if (!dead)
         {
             DrawDamageArcs(k);
             DrawCrosshair(k);
-            if (health != null) DrawHealth(k, health, true);
+            DrawModeSwitch(k);
+            if (health != null) leftTop = DrawHealth(k, health, true);
             if (weapon != null) DrawAmmo(k, weapon);
         }
         else
@@ -324,13 +418,24 @@ public class GameHud : MonoBehaviour
             Health watched = Watched();
             if (watched != null)
             {
-                DrawHealth(k, watched, false);
+                leftTop = DrawHealth(k, watched, false);
                 Weapon w = WeaponOf(watched);
                 if (w != null) DrawAmmo(k, w);
             }
         }
 
-        if (rounds != null) DrawTop(k);
+        DrawMoney(k, leftTop, !dead);
+        if (rounds != null)
+        {
+            // top centre, from the top down: timer and score, round message, the bots tag, the halftime banner
+            float y = DrawTop(k);
+            if (!rounds.IsSolo)
+            {
+                y = DrawBotsFrozenTag(k, y);
+                y = DrawHalftimeBanner(k, y);
+                DrawFreezeCountdown(k, y);
+            }
+        }
 
         GUI.color = Color.white;
     }
@@ -351,6 +456,16 @@ public class GameHud : MonoBehaviour
         midStyle.fontSize = Mathf.Max(6, Mathf.RoundToInt(24f * k));
         smallStyle.fontSize = Mathf.Max(6, Mathf.RoundToInt(18f * k));
         messageStyle.fontSize = Mathf.Max(6, Mathf.RoundToInt(26f * k));
+
+        if (tinyStyle == null)
+        {
+            tinyStyle = MakeStyle(FontStyle.Bold);
+            keyStyle = MakeStyle(FontStyle.Bold);
+            hugeStyle = MakeStyle(FontStyle.Bold);
+        }
+        tinyStyle.fontSize = Mathf.Max(6, Mathf.RoundToInt(14f * k));
+        keyStyle.fontSize = Mathf.Max(6, Mathf.RoundToInt(16f * k));
+        hugeStyle.fontSize = Mathf.Max(10, Mathf.RoundToInt(52f * k));
     }
 
     // the camera of the dead player sits on the watched teammate (see Spectator.Watch)
@@ -375,7 +490,8 @@ public class GameHud : MonoBehaviour
 
     // ---- bottom left: health ----
 
-    void DrawHealth(float k, Health h, bool own)
+    // returns the y of the top edge of what it drew (the bhop box sits above the health)
+    float DrawHealth(float k, Health h, bool own)
     {
         float m = Margin * k;
         float bh = BoxHeight * k;
@@ -397,7 +513,8 @@ public class GameHud : MonoBehaviour
         Fill(bar, new Color(1f, 1f, 1f, 0.15f));
         Fill(new Rect(bar.x, bar.y, bar.width * frac, bar.height), c);
 
-        if (own && bhop != null && bhop.level > 0) DrawBhop(k, box);
+        if (own && bhop != null && bhop.level > 0) return DrawBhop(k, box);
+        return box.y;
     }
 
     // a plus sign like the CS health icon
@@ -409,7 +526,7 @@ public class GameHud : MonoBehaviour
         Fill(new Rect(r.x, r.y + mid, r.width, arm), c);
     }
 
-    void DrawBhop(float k, Rect healthBox)
+    float DrawBhop(float k, Rect healthBox)
     {
         float h = 30f * k;
         Rect box = new Rect(healthBox.x, healthBox.y - 6f * k - h, healthBox.width, h);
@@ -435,6 +552,116 @@ public class GameHud : MonoBehaviour
 
         Text(new Rect(bar.xMax + 8f * k, box.y, 60f * k, h), bhopPercentText, smallStyle,
             percent > 0 ? Color.white : DimText, TextAnchor.MiddleLeft);
+        return box.y;
+    }
+
+    // ---- bottom left, above the health: money and the buy hint ----
+
+    void DrawMoney(float k, float bottom, bool alive)
+    {
+        bool showMoney = Economy.Enabled && health != null;
+        // the same rule as BuyMenu: Economy.CanBuy (without the economy, in solo, buying never ends; otherwise
+        // the buy time, the freeze time included, inside the own buy zone) in a running round.
+        // In the buy time outside the zone a dim note instead of the hint.
+        bool free = !Economy.Enabled;
+        bool running = free || rounds == null || (!rounds.InBreak && !rounds.MatchOver);
+        bool canBuy = alive && health != null && running && Economy.CanBuy(health);
+        bool away = alive && !free && health != null && running && Economy.InBuyTime && !Economy.InBuyZone(health);
+        bool buy = (canBuy || away) && !BuyMenu.IsOpen;
+        bool inZone = canBuy;
+        if (!showMoney && !buy) return;
+
+        float m = Margin * k;
+        float h = Mathf.Round(40f * k);
+        float pad = 16f * k;
+        Rect box = new Rect(m, Mathf.Round(bottom - 6f * k - h), HealthBoxWidth * k, h);
+        float hintX = box.x;
+
+        if (showMoney)
+        {
+            DrawPanel(box, PanelColor, true);
+
+            int money = Economy.MoneyOf(health);
+            if (money != moneyShown)
+            {
+                moneyShown = money;
+                moneyText = money.ToString();
+            }
+
+            // the sum flashes green (got money) or red (spent it) for a moment
+            float flash = Mathf.Clamp01(1f - (Time.time - moneyFlashTime) / 0.6f);
+            Color sumColor = Color.Lerp(Color.white, moneyFlashGain ? moneyColor : lowColor, flash);
+            float dollar = Width(midStyle, "$");
+            Text(new Rect(box.x + pad, box.y, dollar, h), "$", midStyle, moneyColor, TextAnchor.MiddleLeft);
+            Text(new Rect(box.x + pad + dollar + 8f * k, box.y, box.width, h), moneyText, midStyle, sumColor, TextAnchor.MiddleLeft);
+
+            DrawMoneyPopups(k, box);
+            hintX = box.xMax + 6f * k;
+        }
+
+        if (buy) DrawBuyHint(k, new Rect(hintX, box.y, 0f, h), free, inZone);
+    }
+
+    // "+$300  убийство" lines over the money box: the newest at the bottom, they float up and fade out
+    void DrawMoneyPopups(float k, Rect moneyBox)
+    {
+        float life = Mathf.Max(0.5f, moneyPopupTime);
+        float lineH = Mathf.Round(24f * k);
+        int row = 0;
+
+        for (int i = moneyPopups.Count - 1; i >= 0; i--)
+        {
+            MoneyPopup p = moneyPopups[i];
+            float age = Time.time - p.time;
+            if (age > life || age < 0f) continue;
+
+            float alpha = age < 0.15f ? age / 0.15f : age > life - 0.7f ? (life - age) / 0.7f : 1f;
+            float rise = Mathf.Min(age / 0.3f, 1f) * 6f * k;
+            float y = moneyBox.y - 4f * k - (row + 1) * lineH - rise;
+            Color c = p.gain ? moneyColor : lowColor;
+            c.a = Mathf.Clamp01(alpha);
+            Text(new Rect(moneyBox.x + 16f * k, Mathf.Round(y), moneyBox.width * 2f, lineH), p.text, smallStyle, c, TextAnchor.MiddleLeft);
+            row++;
+        }
+    }
+
+    // a key cap with "B" and "закупка 0:15" (no time in solo, where buying never ends);
+    // outside the own buy zone a dim "вне зоны закупки" without the key cap
+    void DrawBuyHint(float k, Rect r, bool free, bool inZone)
+    {
+        float pad = 10f * k;
+
+        if (!inZone)
+        {
+            const string away = "вне зоны закупки";
+            float aw = Width(smallStyle, away);
+            Rect dim = new Rect(r.x, r.y, pad + aw + pad * 1.5f, r.height);
+            DrawPanel(dim, new Color(PanelColor.r, PanelColor.g, PanelColor.b, PanelColor.a * 0.6f), true);
+            Text(new Rect(dim.x + pad, dim.y, aw + pad, dim.height), away, smallStyle, new Color(1f, 1f, 1f, 0.45f), TextAnchor.MiddleLeft);
+            return;
+        }
+
+        string text = "закупка";
+        if (!free)
+        {
+            int s = Mathf.CeilToInt(Economy.BuyTimeLeft);
+            if (s != buySeconds)
+            {
+                buySeconds = s;
+                buyText = "закупка " + (s / 60) + ":" + (s % 60).ToString("00");
+            }
+            text = buyText;
+        }
+
+        float key = Mathf.Round(24f * k);
+        float tw = Width(smallStyle, text);
+        Rect box = new Rect(r.x, r.y, pad + key + 8f * k + tw + pad * 1.5f, r.height);
+        DrawPanel(box, PanelColor, true);
+
+        Rect cap = new Rect(Mathf.Round(box.x + pad), Mathf.Round(box.y + (box.height - key) * 0.5f), key, key);
+        Fill(cap, new Color(1f, 1f, 1f, 0.9f));
+        Text(cap, "B", keyStyle, new Color(0.05f, 0.05f, 0.06f, 1f), TextAnchor.MiddleCenter);
+        Text(new Rect(cap.xMax + 8f * k, box.y, tw + pad, box.height), text, smallStyle, Color.white, TextAnchor.MiddleLeft);
     }
 
     // ---- bottom right: ammo ----
@@ -451,9 +678,41 @@ public class GameHud : MonoBehaviour
         float right = box.xMax - pad;
         float nameRight = right;
         float textH = bh - 6f * k;
+        // a second small line under the weapon name: the fire mode or the Zeus charge
+        string sub = null;
+        Color subColor = DimText;
 
-        if (!w.IsMelee)
+        if (w.IsTaser)
         {
+            // the Zeus: one charge and no reserve, the bar fills while it charges again
+            float charge = w.ChargeProgress;
+            bool ready = charge >= 1f;
+            string mag = Num(w.Ammo);
+            float mw = Width(bigStyle, mag);
+            Text(new Rect(right - mw, box.y, mw, textH), mag, bigStyle, ready ? Color.white : DimText, TextAnchor.MiddleRight);
+            nameRight = right - mw - 12f * k;
+
+            Bar(k, box, pad, charge, ready ? moneyColor : reloadColor);
+            if (ready)
+            {
+                sub = "ЗАРЯЖЕН";
+                subColor = moneyColor;
+            }
+            else
+            {
+                int s = Mathf.CeilToInt((1f - charge) * Mathf.Max(w.rechargeTime, 0f));
+                if (s != chargeSeconds)
+                {
+                    chargeSeconds = s;
+                    chargeText = "ЗАРЯД " + s + " с";
+                }
+                sub = chargeText;
+                subColor = reloadColor;
+            }
+        }
+        else if (!w.IsMelee)
+        {
+            // shotgun shells are counted like rounds, a shell reload fills the bar shell by shell
             int ammo = w.Ammo;
             bool reloading = w.IsReloading;
             string reserve = Weapon.InfiniteAmmo ? "/ ∞" : "/ " + Num(w.Reserve);
@@ -470,22 +729,44 @@ public class GameHud : MonoBehaviour
             Text(new Rect(right - rw - 8f * k - mw, box.y, mw, textH), mag, bigStyle, magColor, TextAnchor.MiddleRight);
             nameRight = right - rw - 8f * k - mw - 12f * k;
 
-            if (reloading)
+            if (reloading) Bar(k, box, pad, w.ReloadProgress, reloadColor);
+
+            // Glock-18 / FAMAS: the right mouse button switches the burst mode
+            if (w.HasBurstMode)
             {
-                Rect bar = new Rect(box.x + pad, box.yMax - 8f * k, bw - pad * 2f, Mathf.Max(2f, Mathf.Round(3f * k)));
-                Fill(bar, new Color(1f, 1f, 1f, 0.15f));
-                Fill(new Rect(bar.x, bar.y, bar.width * w.ReloadProgress, bar.height), reloadColor);
+                sub = w.BurstMode ? "ОЧЕРЕДЬ" : w.automatic ? "АВТО" : "ПОЛУАВТО";
+                subColor = w.BurstMode ? reloadColor : DimText;
             }
         }
 
-        if (!string.IsNullOrEmpty(w.weaponName))
-            Text(new Rect(box.x + pad, box.y, Mathf.Max(0f, nameRight - box.x - pad), textH), w.weaponName, smallStyle,
-                DimText, TextAnchor.MiddleLeft);
+        float nameX = box.x + pad;
+        float nameW = Mathf.Max(0f, nameRight - nameX);
+        bool hasName = !string.IsNullOrEmpty(w.weaponName);
+        if (sub == null)
+        {
+            if (hasName) Text(new Rect(nameX, box.y, nameW, textH), w.weaponName, smallStyle, DimText, TextAnchor.MiddleLeft);
+        }
+        else
+        {
+            // two lines: the name over the middle, the mode under it
+            float half = Mathf.Round(textH * 0.5f);
+            if (hasName) Text(new Rect(nameX, box.y + 2f * k, nameW, half), w.weaponName, smallStyle, DimText, TextAnchor.LowerLeft);
+            Text(new Rect(nameX, box.y + half + 4f * k, nameW, half - 4f * k), sub, tinyStyle, subColor, TextAnchor.UpperLeft);
+        }
+    }
+
+    // a thin bar along the bottom of a box (reload, Zeus charge)
+    void Bar(float k, Rect box, float pad, float t, Color c)
+    {
+        Rect bar = new Rect(box.x + pad, box.yMax - 8f * k, box.width - pad * 2f, Mathf.Max(2f, Mathf.Round(3f * k)));
+        Fill(bar, new Color(1f, 1f, 1f, 0.15f));
+        Fill(new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(t), bar.height), c);
     }
 
     // ---- top centre: timer, score, players, message ----
 
-    void DrawTop(float k)
+    // returns the y under what it drew
+    float DrawTop(float k)
     {
         float cx = Mathf.Round(Screen.width * 0.5f);
         float top = Mathf.Round(10f * k);
@@ -498,19 +779,19 @@ public class GameHud : MonoBehaviour
         {
             Fill(timerBox, solid);
             Text(timerBox, "SOLO", timerStyle, Color.white, TextAnchor.MiddleCenter);
-            DrawMessage(k, cx, timerBox.yMax + 8f * k);
-            return;
+            return DrawMessage(k, cx, timerBox.yMax + 8f * k);
         }
 
-        // timer m:ss, red in the last 10 seconds, grey between rounds
-        int seconds = Mathf.CeilToInt(rounds.TimeLeft);
+        // timer m:ss, red in the last 10 seconds, grey between rounds; in the freeze time it counts the freeze down (blue)
+        bool freeze = RoundManager.InFreezeTime && !rounds.MatchOver;
+        int seconds = freeze ? Mathf.CeilToInt(Mathf.Max(0f, RoundManager.FreezeTimeLeft)) : Mathf.CeilToInt(rounds.TimeLeft);
         if (seconds != timerValue)
         {
             timerValue = seconds;
             timerText = (seconds / 60) + ":" + (seconds % 60).ToString("00");
         }
         bool idle = rounds.InBreak || rounds.MatchOver;
-        Color timerColor = idle ? DimText : seconds <= 10 ? lowColor : Color.white;
+        Color timerColor = freeze ? freezeColor : idle ? DimText : seconds <= 10 ? lowColor : Color.white;
         Fill(timerBox, solid);
         Text(timerBox, timerText, timerStyle, timerColor, TextAnchor.MiddleCenter);
 
@@ -527,7 +808,7 @@ public class GameHud : MonoBehaviour
         DrawPlayers(k, team0, tBox.x - gap, top, h, false, tColor, solid);
         DrawPlayers(k, team1, ctBox.xMax + gap, top, h, true, ctColor, solid);
 
-        DrawMessage(k, cx, top + h + 8f * k);
+        return DrawMessage(k, cx, top + h + 8f * k);
     }
 
     void DrawScore(float k, Rect box, int score, Color team, Color back)
@@ -590,7 +871,8 @@ public class GameHud : MonoBehaviour
         }
     }
 
-    void DrawMessage(float k, float cx, float y)
+    // returns the y under the message (y itself when there is none)
+    float DrawMessage(float k, float cx, float y)
     {
         string msg = rounds.Message ?? "";
 
@@ -608,7 +890,7 @@ public class GameHud : MonoBehaviour
                 lastScore0 = rounds.score[0];
                 lastScore1 = rounds.score[1];
             }
-            return;
+            return y;
         }
 
         tempContent.text = msg;
@@ -621,52 +903,286 @@ public class GameHud : MonoBehaviour
         if (bannerTeam >= 0)
             Fill(new Rect(r.x, r.y, r.width, Mathf.Max(2f, Mathf.Round(3f * k))), bannerTeam == 0 ? tColor : ctColor);
         Text(r, msg, messageStyle, Color.white, TextAnchor.MiddleCenter);
+        return r.yMax + 8f * k;
     }
 
-    // ---- centre: crosshair and damage arcs ----
+    // a small "Боты заморожены" pill while the bots stand still (main menu option); returns the y under it
+    float DrawBotsFrozenTag(float k, float y)
+    {
+        if (!RoundManager.BotsFrozen) return y;
+
+        const string text = "Боты заморожены";
+        float h = Mathf.Round(26f * k);
+        float w = Mathf.Round(Width(smallStyle, text) + 28f * k);
+        Rect r = new Rect(Mathf.Round(Screen.width * 0.5f - w * 0.5f), Mathf.Round(y), w, h);
+        Fill(r, new Color(0.03f, 0.04f, 0.05f, 0.6f));
+        DrawFrame(r, 1f, new Color(freezeColor.r, freezeColor.g, freezeColor.b, 0.45f));
+        Text(r, text, smallStyle, freezeColor, TextAnchor.MiddleCenter);
+        return r.yMax + 8f * k;
+    }
+
+    // "СМЕНА СТОРОН" and "Теперь ты за CT" for a few seconds after the halftime; returns the y under it
+    float DrawHalftimeBanner(float k, float y)
+    {
+        float life = Mathf.Max(0.5f, halftimeBannerTime);
+        float age = Time.time - halftimeTime;
+        if (age < 0f || age > life) return y;
+
+        float alpha = age < 0.2f ? age / 0.2f : age > life - 0.8f ? (life - age) / 0.8f : 1f;
+        alpha = Mathf.Clamp01(alpha);
+
+        int team = halftimeTeam;
+        Color side = team == 0 ? tColor : team == 1 ? ctColor : Color.white;
+        string sub = team == 0 ? "Теперь ты за террористов (T)" : team == 1 ? "Теперь ты за спецназ (CT)" : "";
+
+        float w = Mathf.Min(Mathf.Round(560f * k), Screen.width - 40f * k);
+        float h = Mathf.Round((sub.Length > 0 ? 96f : 66f) * k);
+        Rect r = new Rect(Mathf.Round(Screen.width * 0.5f - w * 0.5f), Mathf.Round(y + 8f * k), w, h);
+
+        Fill(r, new Color(0.03f, 0.04f, 0.05f, 0.8f * alpha));
+        // red and blue halves on top, swapped: the sides have changed
+        float line = Mathf.Max(2f, Mathf.Round(4f * k));
+        Fill(new Rect(r.x, r.y, r.width * 0.5f, line), new Color(ctColor.r, ctColor.g, ctColor.b, alpha));
+        Fill(new Rect(r.x + r.width * 0.5f, r.y, r.width * 0.5f, line), new Color(tColor.r, tColor.g, tColor.b, alpha));
+
+        Text(new Rect(r.x, r.y + 8f * k, r.width, 52f * k), "СМЕНА СТОРОН", bigStyle, new Color(1f, 1f, 1f, alpha), TextAnchor.MiddleCenter);
+        if (sub.Length > 0)
+            Text(new Rect(r.x, r.y + 58f * k, r.width, 30f * k), sub, midStyle, new Color(side.r, side.g, side.b, alpha), TextAnchor.MiddleCenter);
+        return r.yMax + 8f * k;
+    }
+
+    // "Раунд начнётся через 3" in the freeze time at the round start (not over the buy menu, the timer shows it too)
+    void DrawFreezeCountdown(float k, float y)
+    {
+        if (!RoundManager.InFreezeTime || rounds.MatchOver || BuyMenu.IsOpen) return;
+
+        int s = Mathf.Max(1, Mathf.CeilToInt(RoundManager.FreezeTimeLeft));
+        if (s != freezeSeconds)
+        {
+            freezeSeconds = s;
+            freezeText = "Раунд начнётся через " + s;
+        }
+
+        // a little pulse on every new second
+        float frac = RoundManager.FreezeTimeLeft - Mathf.Floor(RoundManager.FreezeTimeLeft);
+        float pulse = 1f + 0.06f * Smooth(0.75f, 1f, frac);
+
+        float top = Mathf.Max(y + 12f * k, Mathf.Round(Screen.height * 0.26f));
+        float h = Mathf.Round(70f * k);
+        Rect r = new Rect(0f, top, Screen.width, h);
+
+        Matrix4x4 old = GUI.matrix;
+        GUIUtility.ScaleAroundPivot(new Vector2(pulse, pulse), r.center);
+        Text(r, freezeText, hugeStyle, Color.white, TextAnchor.MiddleCenter);
+        GUI.matrix = old;
+
+        if (Economy.Enabled && Economy.CanBuy(health))
+            Text(new Rect(0f, r.yMax, Screen.width, Mathf.Round(30f * k)), "Закупайтесь: B — меню закупки", smallStyle,
+                freezeColor, TextAnchor.MiddleCenter);
+    }
+
+    // ---- centre: crosshair, fire mode note and damage arcs ----
 
     void DrawCrosshair(float k)
     {
         if (weapon == null) return;
         if (shoot != null && shoot.IsScoped) return;
-        // sniper rifles have no crosshair, only the scope
-        if (weapon.data != null && weapon.data.scopeFov != null && weapon.data.scopeFov.Length > 0) return;
+        // sniper rifles have no crosshair, only the scope (the SG 553 / AUG keep it until they zoom)
+        if (weapon.HasSniperScope) return;
+        if (GameSettings.CrosshairStyle == CrosshairStyle.None) return;
+
+        // the dynamic crosshair opens up to the real spread of the next shot (stance, burst mode, shotgun pellets)
+        // and a little more after every shot; the bullet goes up to that many degrees off,
+        // turned into pixels with the field of view of the camera
+        float spreadPx = 0f;
+        if (GameSettings.CrosshairDynamic)
+        {
+            float spreadDeg = Mathf.Clamp(weapon.CurrentSpread, 0f, 30f);
+            float vfov = playerCam != null ? playerCam.fieldOfView : 60f;
+            spreadPx = Screen.height * 0.5f * Mathf.Tan(spreadDeg * Mathf.Deg2Rad) / Mathf.Tan(vfov * 0.5f * Mathf.Deg2Rad)
+                       + bloom * k;
+        }
+
+        DrawCrosshairShape(new Vector2(Screen.width * 0.5f, Screen.height * 0.5f), k, spreadPx, GameSettings.CrosshairColorValue);
+    }
+
+    static readonly Rect[] crossPieces = new Rect[5];
+
+    // the crosshair of the settings (style, size, gap, thickness, length, outline) around the point c;
+    // k = the screen scale, spreadPx = the extra gap of the dynamic crosshair (ignored when it is off).
+    // MainMenu draws the live preview of the settings with it.
+    public static void DrawCrosshairShape(Vector2 c, float k, float spreadPx, Color color)
+    {
+        CrosshairStyle style = GameSettings.CrosshairStyle;
+        if (style == CrosshairStyle.None) return;
 
         float size = Mathf.Clamp(GameSettings.CrosshairSize, GameSettings.MinCrosshairSize, GameSettings.MaxCrosshairSize);
-        Color color = GameSettings.CrosshairColorValue;
-
-        // the real spread of the next shot (as in Weapon.TryFire): base spread x stance (crouch < Shift < stand < run < air);
-        // the bullet goes up to that many degrees off, turned into pixels with the camera's field of view
-        float spreadDeg = Mathf.Clamp(weapon.spreadAngle * player.SpreadMultiplier, 0f, 30f);
-        float vfov = playerCam != null ? playerCam.fieldOfView : 60f;
-        float spreadPx = Screen.height * 0.5f * Mathf.Tan(spreadDeg * Mathf.Deg2Rad) / Mathf.Tan(vfov * 0.5f * Mathf.Deg2Rad);
-
-        float len = Mathf.Max(2f, Mathf.Round(crosshairLength * k * size));
-        float thick = Mathf.Max(1f, Mathf.Round(crosshairThickness * k * Mathf.Sqrt(size)));
-        float gap = Mathf.Round(crosshairBaseGap * k * size + spreadPx + bloom * k);
-        gap = Mathf.Min(gap, Screen.height * 0.2f);
-        float outline = Mathf.Max(1f, Mathf.Round(k));
-
-        float cx = Mathf.Floor(Screen.width * 0.5f);
-        float cy = Mathf.Floor(Screen.height * 0.5f);
-        float half = Mathf.Floor(thick * 0.5f);
-
-        Rect right = new Rect(cx + gap, cy - half, len, thick);
-        Rect left = new Rect(cx - gap - len, cy - half, len, thick);
-        Rect down = new Rect(cx - half, cy + gap, thick, len);
-        Rect up = new Rect(cx - half, cy - gap - len, thick, len);
-
-        // thin dark outline first, then the lines
+        float len = Mathf.Max(1f, Mathf.Round(GameSettings.CrosshairLength * k * size));
+        float thick = Mathf.Max(1f, Mathf.Round(GameSettings.CrosshairThickness * k * Mathf.Sqrt(size)));
+        float extra = GameSettings.CrosshairDynamic ? Mathf.Max(0f, spreadPx) : 0f;
+        float gap = Mathf.Min(Mathf.Round(GameSettings.CrosshairGap * k * size + extra), Screen.height * 0.2f);
+        float outline = GameSettings.CrosshairOutline ? Mathf.Max(1f, Mathf.Round(k)) : 0f;
         Color dark = new Color(0f, 0f, 0f, 0.6f * color.a);
-        Fill(Grow(right, outline), dark);
-        Fill(Grow(left, outline), dark);
-        Fill(Grow(down, outline), dark);
-        Fill(Grow(up, outline), dark);
 
-        Fill(right, color);
-        Fill(left, color);
-        Fill(down, color);
-        Fill(up, color);
+        // the lines are thick pixels wide around the centre pixel row and column
+        float cx = Mathf.Floor(c.x);
+        float cy = Mathf.Floor(c.y);
+        float half = Mathf.Floor(thick * 0.5f);
+        float x0 = cx - half, y0 = cy - half;   // the top left corner of the centre square
+
+        if (style == CrosshairStyle.Circle)
+        {
+            // a ring where the lines would be, and the dot
+            Vector2 mid = new Vector2(x0 + thick * 0.5f, y0 + thick * 0.5f);
+            float radius = Mathf.Max(gap + thick * 0.5f + len * 0.5f, thick * 2f);
+            if (outline > 0f) DrawRing(mid, radius, thick * 0.5f + outline, dark);
+            DrawRing(mid, radius, thick * 0.5f, color);
+        }
+
+        int n = 0;
+        switch (style)
+        {
+            case CrosshairStyle.Cross:
+                // one long horizontal and one vertical line, no gap in the middle
+                crossPieces[n++] = new Rect(x0 - len, y0, len * 2f + thick, thick);
+                crossPieces[n++] = new Rect(x0, y0 - len, thick, len * 2f + thick);
+                break;
+            case CrosshairStyle.Classic:
+            case CrosshairStyle.LinesDot:
+            case CrosshairStyle.TShape:
+                crossPieces[n++] = new Rect(x0 + thick + gap, y0, len, thick);   // right
+                crossPieces[n++] = new Rect(x0 - gap - len, y0, len, thick);     // left
+                crossPieces[n++] = new Rect(x0, y0 + thick + gap, thick, len);   // down
+                if (style != CrosshairStyle.TShape)
+                    crossPieces[n++] = new Rect(x0, y0 - gap - len, thick, len); // up
+                if (style == CrosshairStyle.LinesDot) crossPieces[n++] = new Rect(x0, y0, thick, thick);
+                break;
+            case CrosshairStyle.Dot:
+                // alone the dot is a bit bigger than the line thickness, so it is easy to see
+                float grow = Mathf.Max(1f, Mathf.Round(k * size));
+                crossPieces[n++] = new Rect(x0 - grow, y0 - grow, thick + grow * 2f, thick + grow * 2f);
+                break;
+            case CrosshairStyle.Circle:
+                crossPieces[n++] = new Rect(x0, y0, thick, thick);
+                break;
+        }
+
+        // the dark outline first, then the lines over it
+        if (outline > 0f)
+            for (int i = 0; i < n; i++) Fill(Grow(crossPieces[i], outline), dark);
+        for (int i = 0; i < n; i++) Fill(crossPieces[i], color);
+    }
+
+    // ring textures of the Circle crosshair: a few slots, a slot is redrawn only when its ring changes
+    class RingSlot
+    {
+        public Texture2D tex;      // allocated once with room to spare (cap x cap), the ring uses its bottom-left size x size
+        public Color32[] pixels;
+        public int key;
+        public int size;
+        public int used;
+    }
+    static readonly RingSlot[] ringSlots = new RingSlot[4];
+    static int ringUse;
+
+    // a smooth ring around c: radius to the middle of the line, halfWidth = half of the line width (pixels)
+    static void DrawRing(Vector2 c, float radius, float halfWidth, Color color)
+    {
+        float outer = radius + halfWidth + 1f;
+        float left = Mathf.Floor(c.x - outer);
+        float top = Mathf.Floor(c.y - outer);
+        // sizes go in steps of 8 pixels, so a growing ring reuses its texture
+        int size = Mathf.CeilToInt(Mathf.Max(c.x + outer - left, c.y + outer - top));
+        size = Mathf.Max(8, (size + 7) / 8 * 8);
+        float fx = c.x - left, fy = c.y - top;   // the centre inside the texture
+
+        int rq = Mathf.RoundToInt(radius * 4f);
+        int hq = Mathf.Clamp(Mathf.RoundToInt(halfWidth * 4f), 0, 255);
+        int px = Mathf.RoundToInt((c.x - Mathf.Floor(c.x)) * 2f);
+        int py = Mathf.RoundToInt((c.y - Mathf.Floor(c.y)) * 2f);
+        int key = ((rq * 256 + hq) * 3 + px) * 3 + py;
+
+        // the slot with this ring, else an empty one, else the one used longest ago
+        RingSlot slot = null;
+        int free = -1;
+        int oldest = -1;
+        for (int i = 0; i < ringSlots.Length; i++)
+        {
+            RingSlot s = ringSlots[i];
+            if (s == null || s.tex == null)
+            {
+                if (free < 0) free = i;
+                continue;
+            }
+            if (s.key == key && s.size == size)
+            {
+                slot = s;
+                break;
+            }
+            if (oldest < 0 || s.used < ringSlots[oldest].used) oldest = i;
+        }
+
+        if (slot == null)
+        {
+            int index = free >= 0 ? free : Mathf.Max(0, oldest);
+            slot = ringSlots[index] ?? new RingSlot();
+            ringSlots[index] = slot;
+            // a dynamic ring changes its size often: the texture only grows (in steps of 64 px), it is never made smaller
+            if (slot.tex == null || slot.tex.width < size)
+            {
+                if (slot.tex != null) Destroy(slot.tex);
+                int cap = (size + 63) / 64 * 64;
+                slot.tex = new Texture2D(cap, cap, TextureFormat.RGBA32, false);
+                slot.tex.wrapMode = TextureWrapMode.Clamp;
+                slot.tex.filterMode = FilterMode.Point;
+                slot.tex.hideFlags = HideFlags.HideAndDontSave;
+                slot.pixels = new Color32[cap * cap];
+            }
+            slot.key = key;
+            slot.size = size;
+
+            int stride = slot.tex.width;
+            System.Array.Clear(slot.pixels, 0, slot.pixels.Length);
+            // only the pixels near the ring: per row, the span between the outer and the inner circle
+            float ro = radius + halfWidth + 1f;
+            float ri = radius - halfWidth - 1f;
+            for (int y = 0; y < size; y++)
+            {
+                // texture row 0 is the bottom of the rect
+                float gy = size - y - 0.5f - fy;
+                if (Mathf.Abs(gy) > ro) continue;
+                float xo = Mathf.Sqrt(ro * ro - gy * gy);
+                float xi = ri > 0f && Mathf.Abs(gy) < ri ? Mathf.Sqrt(ri * ri - gy * gy) : -1f;
+                int x0 = Mathf.Max(0, Mathf.FloorToInt(fx - xo - 0.5f));
+                int x1 = Mathf.Min(size - 1, Mathf.CeilToInt(fx + xo - 0.5f));
+                for (int x = x0; x <= x1; x++)
+                {
+                    float gx = x + 0.5f - fx;
+                    if (Mathf.Abs(gx) < xi) continue;
+                    float d = Mathf.Sqrt(gx * gx + gy * gy);
+                    float a = Mathf.Clamp01(halfWidth + 0.5f - Mathf.Abs(d - radius));
+                    if (a > 0f) slot.pixels[y * stride + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
+                }
+            }
+            slot.tex.SetPixels32(slot.pixels);
+            slot.tex.Apply(false, false);
+        }
+
+        slot.used = ++ringUse;
+        GUI.color = color;
+        float uv = slot.size / (float)slot.tex.width;
+        GUI.DrawTextureWithTexCoords(new Rect(left, top, size, size), slot.tex, new Rect(0f, 0f, uv, uv));
+        GUI.color = Color.white;
+    }
+
+    // "Режим: очередь" under the crosshair for a moment after the right click on the Glock-18 / FAMAS
+    void DrawModeSwitch(float k)
+    {
+        float age = Time.time - modeSwitchTime;
+        if (age < 0f || age > 1.5f || modeSwitchText.Length == 0) return;
+        float alpha = age < 1f ? 1f : 1f - (age - 1f) / 0.5f;
+        Rect r = new Rect(0f, Mathf.Round(Screen.height * 0.5f + 70f * k), Screen.width, Mathf.Round(30f * k));
+        Text(r, modeSwitchText, smallStyle, new Color(1f, 1f, 1f, alpha), TextAnchor.MiddleCenter);
     }
 
     void DrawDamageArcs(float k)

@@ -1,0 +1,65 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c026ee1111f40f046be8a19334988210, type: 3}
+  m_Name: M4A1-S
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponName: M4A1-S
+  category: 2
+  team: 1
+  viewModelPrefab: {fileID: 0}
+  price: 2900
+  killReward: 300
+  damage: 33
+  headMultiplier: 4
+  chestMultiplier: 0.969697
+  stomachMultiplier: 1.2424242
+  legMultiplier: 0.72727275
+  armorPenetration: 0.7
+  range: 100
+  effectiveRange: 28
+  fireRate: 10
+  automatic: 1
+  drawTime: 1
+  boltAction: 0
+  silenced: 1
+  dual: 0
+  burstCount: 0
+  burstFireRate: 20
+  pellets: 0
+  pelletSpread: 3
+  shellReload: 0
+  shellReloadTime: 0.4
+  fireDelay: 0
+  altFireRate: 0
+  altSpreadMultiplier: 3
+  taser: 0
+  rechargeTime: 30
+  spreadAngle: 0.7
+  recoil: 0.832
+  penetration: 2
+  magazineSize: 20
+  reserveAmmo: 80
+  reloadTime: 3.1
+  moveSpeedFactor: 0.9
+  firingMoveSpeedFactor: 0
+  melee: 0
+  meleeRange: 2
+  secondaryDamage: 65
+  secondaryInterval: 1
+  backstabDamage: 180
+  followUpDamage: 0
+  scopeFov: []
+  unscopedSpreadMultiplier: 1
+  unscopedMinSpread: 1.2
+  scopedMoveFactor: 0.5
+  scopedMoveSpread: 3
+  scopeIsOptic: 0

@@ -1,0 +1,66 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c026ee1111f40f046be8a19334988210, type: 3}
+  m_Name: SG 553
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponName: SG 553
+  category: 2
+  team: 0
+  viewModelPrefab: {fileID: 0}
+  price: 3000
+  killReward: 300
+  damage: 30
+  headMultiplier: 4
+  chestMultiplier: 1
+  stomachMultiplier: 1.2333333
+  legMultiplier: 0.73333335
+  armorPenetration: 1
+  range: 100
+  effectiveRange: 36
+  fireRate: 11.1
+  automatic: 1
+  drawTime: 1
+  boltAction: 0
+  silenced: 0
+  dual: 0
+  burstCount: 0
+  burstFireRate: 20
+  pellets: 0
+  pelletSpread: 3
+  shellReload: 0
+  shellReloadTime: 0.4
+  fireDelay: 0
+  altFireRate: 0
+  altSpreadMultiplier: 3
+  taser: 0
+  rechargeTime: 30
+  spreadAngle: 0.5
+  recoil: 0.896
+  penetration: 2.4
+  magazineSize: 30
+  reserveAmmo: 90
+  reloadTime: 2.8
+  moveSpeedFactor: 0.84
+  firingMoveSpeedFactor: 0
+  melee: 0
+  meleeRange: 2
+  secondaryDamage: 65
+  secondaryInterval: 1
+  backstabDamage: 180
+  followUpDamage: 0
+  scopeFov:
+  - 45
+  unscopedSpreadMultiplier: 1.6
+  unscopedMinSpread: 0
+  scopedMoveFactor: 0.71428573
+  scopedMoveSpread: 1.5
+  scopeIsOptic: 1

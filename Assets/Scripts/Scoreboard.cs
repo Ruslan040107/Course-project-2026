@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// Hold TAB to see the score table. Collects kills, deaths, assists, headshots and damage.
+// Hold TAB to see the score table. Collects kills, deaths, assists, headshots and damage; shows the MVP stars of the match.
 public class Scoreboard : MonoBehaviour
 {
     public KeyCode key = KeyCode.Tab;
@@ -35,6 +35,9 @@ public class Scoreboard : MonoBehaviour
     }
 
     readonly Dictionary<Health, Stats> stats = new Dictionary<Health, Stats>();
+
+    // a new match (RoundManager.ResetMatch) starts with an empty table
+    public void ResetStats() { stats.Clear(); }
 
     RoundManager rounds;
     PlayerController player;
@@ -232,6 +235,15 @@ public class Scoreboard : MonoBehaviour
             numStyle.normal.textColor = tc;
 
             GUI.Label(new Rect(x + 125f * s, y, 400f * s, rowH), r.name, nameStyle);
+
+            // MVP stars of the match (RoundManager: the best player of a won round), like CS
+            int mvp = rounds != null ? rounds.MvpCount(r.h) : 0;
+            if (mvp > 0)
+            {
+                numStyle.normal.textColor = dead ? new Color(1f, 0.82f, 0.3f, 0.45f) : new Color(1f, 0.82f, 0.3f, 1f);
+                GUI.Label(new Rect(x + 440f * s, y, 70f * s, rowH), mvp > 1 ? "★" + mvp : "★", numStyle);
+                numStyle.normal.textColor = tc;
+            }
 
             int hs = r.st.kills > 0 ? Mathf.RoundToInt(100f * r.st.headshots / r.st.kills) : 0;
             string[] vals =

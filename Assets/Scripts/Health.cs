@@ -86,6 +86,9 @@ public class Health : MonoBehaviour
         if (attacker != null) Damaged?.Invoke(attacker);
         pendingDamage += amount;
 
+        // this attacker already hit in this physics step and made the last hit (the other pellets of a shotgun shell)
+        bool sameStep = attacker != null && attacker == pendingAttacker && pendingFrom.ContainsKey(attacker);
+
         if (attacker != null && amount > 0f)
         {
             pendingFrom.TryGetValue(attacker, out float before);
@@ -96,8 +99,9 @@ public class Health : MonoBehaviour
         // does not take it from an enemy who hit in the same step
         if (IsTeammate(attacker) && IsEnemy(pendingAttacker) && pendingFrom.ContainsKey(pendingAttacker)) return;
 
+        // the pellets of one shotgun shell come in the same step: a kill is a headshot if any of them hit the head
         if (attacker != null) pendingAttacker = attacker;
-        pendingHeadshot = headshot;
+        pendingHeadshot = headshot || (sameStep && pendingHeadshot);
         pendingNoScope = noScope;
         pendingInAir = inAir;
         pendingWallbang = wallbang;

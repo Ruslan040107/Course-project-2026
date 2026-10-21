@@ -1,7 +1,6 @@
-# Reload sets for every weapon and the knife flip, cut from CC0 recordings (see CREDITS.md).
+# Reload sets for every weapon, cut from CC0 recordings (see CREDITS.md).
 # usage: python make_reload_sounds.py <folder with the raw wavs> <Assets/Resources/Audio>
 # Output: Reload/<weapon>/{mag_out,mag_in,bolt_back,bolt_forward | slide_back,slide_forward}_N.wav
-#         Knife/flip_N.wav
 # 48 kHz mono 16 bit, trimmed, short fades, high-pass 80 Hz, peak 0.8 (loud slams turned down to the others' level).
 # The times below were found by onset detection and by looking at waveform/spectrogram pictures.
 import sys, os, numpy as np
@@ -113,8 +112,4 @@ for name, (p, fx) in pistols.items():
     save(f'{R}/{name}/slide_back_0.wav', fx(part(PI, 1.02, 1.185, p)))
     save(f'{R}/{name}/slide_forward_0.wav', fx(part(PI, 1.185, 1.40, p)))
 
-# knife flip: short light metallic clicks without the low part
-def flick(y): return hp(y, 1200, 4)
-save('Knife/flip_0.wav', flick(part(EC, 2.055, 2.17, 1.1)), 0.7)
-save('Knife/flip_1.wav', flick(part(EC, 1.125, 1.20, 1.15)), 0.7)
-save('Knife/flip_2.wav', np.concatenate([norm(flick(part(EC, 2.28, 2.30, 1.1)), 0.6), gap(0.045), norm(flick(part(EC, 2.055, 2.15, 1.25)))]), 0.7)
+# the knife flip clicks are made by make_knife_sounds.py now

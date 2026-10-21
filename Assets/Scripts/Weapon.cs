@@ -13,7 +13,15 @@ public struct ShotInfo
     public Transform muzzle;
     public float recoil;
     public bool melee;
+    public bool stab;       // the knife's right click stab (melee too)
     public bool wallbang;   // the bullet went through at least one object before it hit
+    // a shotgun pellet after the first one of the same shot: it has its own tracer, impact and blood,
+    // but the sound, the flash, the recoil and shot counters use only the first pellet (pellet = false)
+    public bool pellet;
+    public bool taser;      // the Zeus x27 shot
+    public bool leftHand;   // Dual Berettas: this shot came from the left pistol
+    public bool silenced;   // USP-S, M4A1-S, MP5-SD: a quiet shot without a big flash
+    public WeaponData weapon;   // the weapon that fired (null for a weapon without data)
 }
 
 public class Weapon : MonoBehaviour
@@ -34,6 +42,10 @@ public class Weapon : MonoBehaviour
     // for sounds: any weapon started a reload / was taken in hands
     public static event System.Action<Weapon> AnyReloadStarted;
     public static event System.Action<Weapon> AnyEquipped;
+    // shell-by-shell reload (Nova, XM1014, Sawed-Off): one shell went into the gun
+    public static event System.Action<Weapon> AnyShellInserted;
+    // the burst mode was switched on or off (Glock-18, FAMAS), for a HUD hint or a click sound
+    public static event System.Action<Weapon> AnyModeSwitched;
 
     // solo test mode: the magazine never runs out
     public static bool InfiniteAmmo;
@@ -51,16 +63,49 @@ public class Weapon : MonoBehaviour
     public float damage = 25f;
     public float headMultiplier = 3f;
     public float legMultiplier = 0.75f;
+    public float chestMultiplier = 1f;
+    public float stomachMultiplier = 1.25f;
+    [Tooltip("0..1, part of the damage that goes through armour")] public float armorPenetration = 0.775f;
+    [Tooltip("full damage up to this distance, then it falls off (see FalloffAt); 0 = no falloff")]
+    public float effectiveRange = 0f;
     [Tooltip("used when the hit collider has no HitZone: the head is the part of the collider above this height (0..1)")]
     [Range(0f, 1f)] public float headZoneStart = 0.72f;
     [Tooltip("the legs are the part of the collider below this height (0..1)")]
     [Range(0f, 1f)] public float legZoneEnd = 0.35f;
+    [Tooltip("the stomach is the part of the collider between legZoneEnd and this height (0..1), the chest is above it")]
+    [Range(0f, 1f)] public float stomachZoneEnd = 0.52f;
 
     [Header("Fire")]
     public float fireRate = 8f;
     public float range = 100f;
     public float spreadAngle = 0f;
     public bool automatic = true;
+    public bool boltAction;
+    public bool silenced;
+    public bool dual;
+
+    [Header("Burst mode (Glock-18, FAMAS)")]
+    [Tooltip("shots in one burst, 0 or 1 = no burst mode")] public int burstCount;
+    [Tooltip("shots per second inside a burst")] public float burstFireRate = 20f;
+    [Tooltip("spread multiplier of the shots of a burst")] public float burstSpreadMultiplier = 1.25f;
+    [Tooltip("pause after the last shot of a burst before the next burst, seconds")] public float burstCooldown = 0.35f;
+
+    [Header("Shotgun")]
+    [Tooltip("pellets in one shell, 0 or 1 = a single bullet; damage is per pellet")] public int pellets;
+    [Tooltip("spread of the pellets around the aim point, degrees")] public float pelletSpread = 3f;
+    [Tooltip("reloads one shell at a time")] public bool shellReload;
+    public float shellReloadTime = 0.4f;
+    [Tooltip("time before the first shell (set from reloadTime when there is data)")] public float shellStartDelay = 0.4f;
+
+    [Header("Revolver (R8)")]
+    [Tooltip("left click pulls the hammer for this time before the shot, 0 = shoots at once")] public float fireDelay;
+    [Tooltip("spread multiplier of the shot after the hammer pull: it is very accurate")] public float hammerSpreadMultiplier = 0.5f;
+    [Tooltip("right click fanning, shots per second; 0 = no alternative fire")] public float altFireRate;
+    public float altSpreadMultiplier = 3f;
+
+    [Header("Taser (Zeus)")]
+    public bool taser;
+    [Tooltip("seconds until the taser can fire again")] public float rechargeTime = 30f;
 
     [Header("Ammo")]
     public int magazineSize = 30;
@@ -70,6 +115,8 @@ public class Weapon : MonoBehaviour
     [Header("Other")]
     public float botSpreadMultiplier = 2f;
     public float moveSpeedFactor = 1f;
+    [Tooltip("speed factor while firing (last shot less than FiringTime ago), 0 = moveSpeedFactor")]
+    public float firingMoveSpeedFactor;
     public float recoilFactor = 1f;
 
     // 0..1, how much the shooter moves; the player gets it from PlayerController, bots set it from BotController
@@ -82,19 +129,54 @@ public class Weapon : MonoBehaviour
     public bool IsMelee => data != null && data.melee;
     public Health Owner => owner;
 
+    public bool IsTaser => taser;
+    public bool IsShotgun => pellets > 1;
+    public bool Silenced => silenced;
+    public bool HasBurstMode => burstCount > 1;
+    public bool HasAltFire => altFireRate > 0f;
+    // a sniper scope with the black mask (AWP, SSG 08, SCAR-20, G3SG1)
+    public bool HasSniperScope => data != null && data.HasScope && !data.scopeIsOptic;
+    // a red dot / small optic (SG 553, AUG): zoom without the mask, the gun stays visible
+    public bool HasOpticScope => data != null && data.HasScope && data.scopeIsOptic;
+    // the bolt is cycled after every shot (AWP, SSG 08; from data.boltAction): the scope is left for it.
+    // Auto-snipers (SCAR-20, G3SG1) have a sniper scope but no bolt
+    public bool BoltAction => boltAction;
+
     // everything except automatic rifles reloads by itself when the magazine gets empty
     bool AutoReloads => !(data != null && data.category == WeaponCategory.Rifle && data.automatic);
 
-    // set by PlayerShoot; bots are always treated as scoped
+    // the scope is in use: set by PlayerShoot for the player and by BotController for bots (scoped at a distance)
     public bool Scoped { get; set; } = true;
+
+    // burst mode of the Glock-18 / FAMAS: the player switches it with the right mouse button, bots keep it off.
+    // Each weapon keeps its own mode while the player switches between weapons.
+    public bool BurstMode { get; set; }
+
+    // "firing" for the move speed: the last shot is younger than this, seconds
+    public const float FiringTime = 0.4f;
+
+    // damage falloff: x FalloffPerRange for every effectiveRange behind effectiveRange, never below MinFalloff
+    public const float FalloffPerRange = 0.85f;
+    public const float MinFalloff = 0.5f;
 
     float nextShotTime;
     float drawEndTime;
+    float reloadStart;
     float reloadEnd;
+    float shellNext;          // shell reload: when the next shell goes in
+    float lastShotTime = -10f;
     int ammo;
     int reserve;
     bool reloading;
     Health owner;
+
+    int burstLeft;            // shots of the current burst still to fire
+    float nextBurstShot;
+    bool hammerPulling;       // R8: the hammer is being pulled, the shot comes at hammerShotTime
+    float hammerShotTime;
+    int dualShots;            // Dual Berettas: shots since the weapon was taken (odd = right pistol)
+
+    readonly Dictionary<WeaponData, bool> burstModes = new Dictionary<WeaponData, bool>();
 
     public int Ammo { get { FinishReload(); return ammo; } }
     public int Reserve { get { FinishReload(); return reserve; } }
@@ -102,7 +184,67 @@ public class Weapon : MonoBehaviour
     public float NextShotTime => nextShotTime;
     // the weapon is still being taken in the hands: no shots and no scope until the draw animation ends
     public bool IsDrawing => Time.time < drawEndTime;
-    public float ReloadProgress => reloading ? Mathf.Clamp01(1f - (reloadEnd - Time.time) / reloadTime) : 1f;
+    public float ReloadProgress => reloading ? Mathf.Clamp01((Time.time - reloadStart) / Mathf.Max(reloadEnd - reloadStart, 0.01f)) : 1f;
+
+    // shell reload: progress 0..1 of the shell that goes in now (0 before the first one and when not reloading)
+    public bool IsShellReload => shellReload;
+    public float ShellProgress => reloading && shellReload
+        ? Mathf.Clamp01(1f - (shellNext - Time.time) / Mathf.Max(shellReloadTime, 0.01f))
+        : 0f;
+
+    // a burst is being fired
+    public bool IsBursting => burstLeft > 0;
+
+    // R8: the hammer is being pulled (0..1), the shot comes when it reaches 1
+    public bool IsHammerPulling => hammerPulling;
+
+    // the player holds right click for R8 fanning (PlayerShoot sets it every frame; bots never do): the crosshair shows that spread
+    [System.NonSerialized] public bool AltFireHeld;
+
+    // R8: the left button was let go before the hammer was fully pulled, so there is no shot (like CS 2)
+    public void CancelHammer()
+    {
+        hammerPulling = false;
+    }
+    public float HammerProgress => hammerPulling && fireDelay > 0f
+        ? Mathf.Clamp01(1f - (hammerShotTime - Time.time) / fireDelay)
+        : 0f;
+
+    // Zeus: 1 = charged, then it grows from 0 to 1 during rechargeTime after a shot
+    public float ChargeProgress
+    {
+        get
+        {
+            if (!taser) return 1f;
+            FinishReload();
+            if (ammo > 0) return 1f;
+            return Mathf.Clamp01(1f - (nextShotTime - Time.time) / Mathf.Max(rechargeTime, 0.01f));
+        }
+    }
+
+    // Dual Berettas: the last shot came from the left pistol (they take turns, the first shot is from the right one)
+    public bool LeftHandShot => dual && dualShots > 0 && dualShots % 2 == 0;
+
+    // shooting right now: a recent shot, a burst or a pulled hammer
+    public bool IsFiring => Time.time - lastShotTime < FiringTime || hammerPulling || burstLeft > 0;
+
+    // the player's speed factor: firingMoveSpeedFactor while firing (R8, G3SG1), otherwise moveSpeedFactor
+    public float CurrentMoveSpeedFactor => firingMoveSpeedFactor > 0f && IsFiring ? firingMoveSpeedFactor : moveSpeedFactor;
+
+    // the largest angle (degrees) the next shot can go off the aim, for the crosshair;
+    // the burst spread and the pellet spread of shotguns are included
+    public float CurrentSpread
+    {
+        get
+        {
+            float s = BaseSpread(out bool _);
+            if (BurstMode && HasBurstMode) s *= burstSpreadMultiplier;
+            if (AltFireHeld && HasAltFire) s *= altSpreadMultiplier;
+            else if (fireDelay > 0f) s *= hammerSpreadMultiplier;
+            if (IsShotgun) s += pelletSpread;
+            return s;
+        }
+    }
 
     void Awake()
     {
@@ -118,28 +260,60 @@ public class Weapon : MonoBehaviour
         damage = data.damage;
         headMultiplier = data.headMultiplier;
         legMultiplier = data.legMultiplier;
+        chestMultiplier = data.chestMultiplier;
+        stomachMultiplier = data.stomachMultiplier;
+        armorPenetration = data.armorPenetration;
         range = data.range;
+        effectiveRange = data.effectiveRange;
         fireRate = data.fireRate;
         automatic = data.automatic;
+        boltAction = data.boltAction;
+        silenced = data.silenced;
+        dual = data.dual;
+        burstCount = data.burstCount;
+        burstFireRate = data.burstFireRate;
+        pellets = data.pellets;
+        pelletSpread = data.pelletSpread;
+        shellReload = data.shellReload;
+        shellReloadTime = data.shellReloadTime;
+        fireDelay = data.fireDelay;
+        altFireRate = data.altFireRate;
+        altSpreadMultiplier = data.altSpreadMultiplier;
+        taser = data.taser;
+        rechargeTime = data.rechargeTime;
         spreadAngle = data.spreadAngle;
         recoilFactor = data.recoil;
         magazineSize = data.magazineSize;
         reserveAmmo = data.reserveAmmo;
         reloadTime = data.reloadTime;
         moveSpeedFactor = data.moveSpeedFactor;
+        firingMoveSpeedFactor = data.firingMoveSpeedFactor;
+
+        // the whole shell reload (start + a full magazine of shells) takes about reloadTime, like in the weapon table
+        // 0 when the shells alone already take the table's reload time (XM1014: 7 x 0.4 = 2.8)
+        if (shellReload) shellStartDelay = Mathf.Clamp(reloadTime - magazineSize * shellReloadTime, 0f, 0.6f);
+        // the taser holds one charge
+        if (taser) magazineSize = Mathf.Max(1, magazineSize);
     }
 
     // ammoNow / reserveNow below 0 means a full magazine and full reserve
     public void Equip(WeaponData newData, int ammoNow = -1, int reserveNow = -1, float readyAt = 0f)
     {
+        // every weapon remembers its burst mode
+        if (data != null) burstModes[data] = BurstMode;
+
         data = newData;
         if (data != null) CopyData();
 
         ResetAmmo();
         if (ammoNow >= 0) ammo = Mathf.Min(ammoNow, magazineSize);
         if (reserveNow >= 0) reserve = reserveNow;
+        // a used Zeus that charged again while it was put away comes back charged
+        if (taser && ammo < magazineSize && readyAt <= Time.time) ammo = magazineSize;
+        BurstMode = data != null && HasBurstMode && burstModes.TryGetValue(data, out bool burst) && burst;
 
         // the weapon is ready after its draw time, but never before its own shot cooldown has passed
+        // (for the Zeus the cooldown is its recharge, so a used taser stays empty while it is put away)
         float drawEnd = Time.time + (data != null ? data.drawTime : 0f);
         nextShotTime = Mathf.Max(readyAt, drawEnd);
         drawEndTime = drawEnd;
@@ -152,11 +326,92 @@ public class Weapon : MonoBehaviour
         reserve = reserveAmmo;
         reloading = false;
         nextShotTime = 0f;
+        lastShotTime = -10f;
+        lastSlashTime = -10f;
+        dualShots = 0;
+        CancelTrigger();
+    }
+
+    public void ToggleBurstMode()
+    {
+        if (!HasBurstMode) return;
+        BurstMode = !BurstMode;
+        AnyModeSwitched?.Invoke(this);
+    }
+
+    void Update()
+    {
+        Tick();
+    }
+
+    void OnDisable()
+    {
+        CancelTrigger();
+    }
+
+    // stops a burst and a pulled hammer
+    void CancelTrigger()
+    {
+        burstLeft = 0;
+        hammerPulling = false;
+    }
+
+    // shells of a shell reload, the taser charge, the delayed R8 shot and the rest of a burst
+    // (from Update, and from TryFire for bots that shoot in FixedUpdate)
+    void Tick()
+    {
+        FinishReload();
+        if (!hammerPulling && burstLeft <= 0) return;
+
+        if ((owner != null && owner.IsDead) || IsDrawing || reloading || FireBlocked)
+        {
+            CancelTrigger();
+            return;
+        }
+
+        if (hammerPulling && Time.time >= hammerShotTime)
+        {
+            hammerPulling = false;
+            if (ammo > 0)
+            {
+                // the whole cycle (hammer + shot) takes 1 / fireRate, counted from the planned shot time
+                // (a long frame in a fast simulation does not make the cycle longer)
+                nextShotTime = hammerShotTime + Mathf.Max(0f, 1f / Mathf.Max(fireRate, 0.01f) - fireDelay);
+                FireShot(hammerSpreadMultiplier);
+            }
+        }
+
+        while (burstLeft > 0 && Time.time >= nextBurstShot)
+        {
+            if (ammo <= 0 || reloading)
+            {
+                burstLeft = 0;
+                break;
+            }
+            burstLeft--;
+            nextBurstShot += 1f / Mathf.Max(burstFireRate, 0.01f);
+            FireShot(burstSpreadMultiplier);
+        }
     }
 
     void FinishReload()
     {
-        if (!reloading || Time.time < reloadEnd) return;
+        // the Zeus charges again by itself, it has no reload
+        if (taser)
+        {
+            if (ammo < magazineSize && Time.time >= nextShotTime) ammo = magazineSize;
+            return;
+        }
+
+        if (!reloading) return;
+
+        if (shellReload)
+        {
+            while (reloading && Time.time >= shellNext) InsertShell();
+            return;
+        }
+
+        if (Time.time < reloadEnd) return;
 
         int take = Mathf.Min(magazineSize - ammo, reserve);
         ammo += take;
@@ -164,25 +419,65 @@ public class Weapon : MonoBehaviour
         reloading = false;
     }
 
+    // shell reload: one shell from the reserve into the gun, the reload ends when the gun is full or the reserve is empty
+    void InsertShell()
+    {
+        if (ammo < magazineSize && reserve > 0)
+        {
+            ammo++;
+            reserve--;
+            AnyShellInserted?.Invoke(this);
+        }
+
+        shellNext += shellReloadTime;
+        if (ammo >= magazineSize || reserve <= 0) reloading = false;
+    }
+
     public void StartReload()
     {
         FinishReload();
-        if (InfiniteAmmo) return;
+        if (InfiniteAmmo || taser) return;
+        if (IsDrawing) return;   // like shots and the scope: no reload while the weapon is being drawn
         if (reloading || ammo >= magazineSize || reserve <= 0) return;
 
+        CancelTrigger();
         reloading = true;
-        reloadEnd = Time.time + reloadTime;
+        reloadStart = Time.time;
+
+        if (shellReload)
+        {
+            // a short start, then one shell every shellReloadTime
+            int shells = Mathf.Min(magazineSize - ammo, reserve);
+            shellNext = Time.time + shellStartDelay + shellReloadTime;
+            reloadEnd = Time.time + shellStartDelay + shells * shellReloadTime;
+        }
+        else
+        {
+            reloadEnd = Time.time + reloadTime;
+        }
+
         ReloadStarted?.Invoke();
         AnyReloadStarted?.Invoke(this);
     }
 
+    // the freeze time at the round start (nobody shoots, stabs or uses the Zeus; reloads go on),
+    // and the frozen bots of the training option; both are never set in simulations
+    bool FireBlocked => RoundManager.InFreezeTime || (RoundManager.BotsFrozen && movement == null && owner != null &&
+                                                      owner.GetComponent<BotController>() != null);
+
+    // left click (bots call it too): a shot, a burst in burst mode, or the R8 hammer pull
     public bool TryFire()
     {
+        if (FireBlocked) return false;
         // nothing until the weapon is drawn (also after ResetAmmo, which clears the shot cooldown)
         if (IsDrawing) return false;
         if (IsMelee) return Melee(false);
 
-        FinishReload();
+        Tick();
+        if (hammerPulling || burstLeft > 0) return false;
+
+        // a shot stops a shell-by-shell reload if there is a shell in the gun (and the shot can go now)
+        if (reloading && shellReload && ammo > 0 && Time.time >= nextShotTime) reloading = false;
         if (reloading) return false;
 
         if (ammo <= 0)
@@ -192,42 +487,139 @@ public class Weapon : MonoBehaviour
         }
 
         if (Time.time < nextShotTime) return false;
-        nextShotTime = Time.time + 1f / fireRate;
+
+        // R8: the hammer is pulled first, the shot comes fireDelay later (see Tick)
+        if (fireDelay > 0f)
+        {
+            hammerPulling = true;
+            hammerShotTime = Time.time + fireDelay;
+            return false;
+        }
+
+        if (BurstMode && HasBurstMode)
+        {
+            // the first shot now, the others every 1 / burstFireRate (see Tick), then a pause
+            float interval = 1f / Mathf.Max(burstFireRate, 0.01f);
+            burstLeft = burstCount - 1;
+            nextBurstShot = Time.time + interval;
+            nextShotTime = Time.time + interval * (burstCount - 1) + Mathf.Max(burstCooldown, 1f / Mathf.Max(fireRate, 0.01f));
+            FireShot(burstSpreadMultiplier);
+            return true;
+        }
+
+        nextShotTime = Time.time + 1f / Mathf.Max(fireRate, 0.01f);
+        FireShot(1f);
+        return true;
+    }
+
+    // right click with the R8: fanning, fast inaccurate shots without the hammer delay
+    public bool TryAltFire()
+    {
+        if (FireBlocked || !HasAltFire || IsMelee || IsDrawing) return false;
+
+        Tick();
+        if (burstLeft > 0) return false;
+
+        if (reloading && shellReload && ammo > 0 && Time.time >= nextShotTime) reloading = false;
+        if (reloading) return false;
+
+        if (ammo <= 0)
+        {
+            StartReload();
+            return false;
+        }
+
+        if (Time.time < nextShotTime) return false;
+
+        hammerPulling = false;   // fanning instead of the pulled hammer
+        nextShotTime = Time.time + 1f / altFireRate;
+        FireShot(altSpreadMultiplier);
+        return true;
+    }
+
+    // the largest angle (degrees) a shot can go off the aim: stance (or the bot's multipliers) and the scope.
+    // For a weapon with a scope (snipers, SG 553, AUG) spreadAngle is the scoped spread,
+    // without the scope it is x unscopedSpreadMultiplier (and at least unscopedMinSpread)
+    float BaseSpread(out bool noScope)
+    {
+        float mult = movement != null ? movement.SpreadMultiplier : botSpreadMultiplier * ExternalSpreadMultiplier;
+        bool scope = data != null && data.HasScope;
+        bool unscoped = scope && !Scoped;
+        // the no-scope kill (killfeed icon) is only for rifles with a sniper scope
+        noScope = unscoped && HasSniperScope;
+        if (unscoped) mult *= data.unscopedSpreadMultiplier;
+
+        float spreadNow = spreadAngle * mult;
+        if (unscoped) spreadNow = Mathf.Max(spreadNow, data.unscopedMinSpread);
+
+        // scoped while moving: the scope does not help, the shot goes wide
+        if (scope && Scoped)
+        {
+            float mi = movement != null ? movement.MoveInaccuracy : ExternalMoveInaccuracy;
+            spreadNow = Mathf.Max(spreadNow, data.scopedMoveSpread * mi);
+        }
+
+        return spreadNow;
+    }
+
+    // one trigger pull: a round leaves the magazine, then one bullet, the pellets of a shell or the taser charge fly
+    void FireShot(float spreadFactor)
+    {
         ammo--;
         if (InfiniteAmmo) ammo = magazineSize;
+        lastShotTime = Time.time;
+        if (dual) dualShots++;
         if (ammo <= 0 && AutoReloads) StartReload();
+
+        // the taser is empty until it charges again
+        if (taser && !InfiniteAmmo) nextShotTime = Time.time + rechargeTime;
 
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
 
         bool inAir = movement != null ? !movement.IsGrounded : ExternalInAir;
-        float mult = movement != null ? movement.SpreadMultiplier : botSpreadMultiplier * ExternalSpreadMultiplier;
-        bool noScope = data != null && data.scopeFov != null && data.scopeFov.Length > 0 && !Scoped;
-        if (noScope) mult *= data.unscopedSpreadMultiplier;
+        float spreadNow = BaseSpread(out bool noScope) * spreadFactor;
 
-        float spreadNow = spreadAngle * mult;
-        if (noScope) spreadNow = Mathf.Max(spreadNow, data.unscopedMinSpread);
-
-        // scoped sniper while moving: the scope does not help, the shot goes wide
-        bool scopedSniper = data != null && data.scopeFov != null && data.scopeFov.Length > 0 && Scoped;
-        if (scopedSniper)
-        {
-            float mi = movement != null ? movement.MoveInaccuracy : ExternalMoveInaccuracy;
-            spreadNow = Mathf.Max(spreadNow, data.scopedMoveSpread * mi);
-        }
         Quaternion spread = Quaternion.Euler(
             Random.Range(-spreadNow, spreadNow),
             Random.Range(-spreadNow, spreadNow),
             0f);
-        Vector3 direction = muzzle.rotation * spread * Vector3.forward;
+        Quaternion aim = muzzle.rotation * spread;
 
+        if (taser)
+        {
+            FireTaser(aim * Vector3.forward, inAir);
+            return;
+        }
+
+        // a shotgun shell: the pellets scatter around the aim point, each one is a bullet of its own
+        int count = Mathf.Max(1, pellets);
+        for (int i = 0; i < count; i++)
+        {
+            Quaternion offset = Quaternion.identity;
+            if (count > 1)
+            {
+                Vector2 p = Random.insideUnitCircle * pelletSpread;
+                offset = Quaternion.Euler(p.y, p.x, 0f);
+            }
+            FireBullet(aim * offset * Vector3.forward, noScope, inAir, i > 0);
+        }
+    }
+
+    // one bullet (or one pellet): damage, then the shot event for effects and sounds
+    void FireBullet(Vector3 direction, bool noScope, bool inAir, bool pellet)
+    {
         ShotInfo shot = new ShotInfo
         {
             origin = muzzle.position,
             end = muzzle.position + direction * range,
             shooter = owner,
             muzzle = muzzle,
-            recoil = recoilFactor
+            recoil = recoilFactor,
+            pellet = pellet,
+            leftHand = LeftHandShot,
+            silenced = silenced,
+            weapon = data
         };
 
         if (PenetrationEnabled)
@@ -246,7 +638,7 @@ public class Weapon : MonoBehaviour
             {
                 float multiplier = ZoneMultiplier(hit, out head);
                 if (friendly) multiplier *= FriendlyFireScale;
-                target.TakeDamage(damage * multiplier, owner, head, noScope, inAir, false, data);
+                target.TakeDamage(damage * multiplier * FalloffAt(hit.distance), owner, head, noScope, inAir, false, data);
             }
 
             shot.end = hit.point;
@@ -259,7 +651,54 @@ public class Weapon : MonoBehaviour
         }
 
         AnyShot?.Invoke(shot);
-        return true;
+    }
+
+    // Zeus: a short ray, the first player in it takes the whole charge (no body parts, no penetration, no falloff)
+    void FireTaser(Vector3 direction, bool inAir)
+    {
+        ShotInfo shot = new ShotInfo
+        {
+            origin = muzzle.position,
+            end = muzzle.position + direction * range,
+            shooter = owner,
+            muzzle = muzzle,
+            recoil = recoilFactor,
+            taser = true,
+            weapon = data
+        };
+
+        RaycastHit[] hits = Physics.RaycastAll(muzzle.position, direction, range,
+                                               Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit hit = hits[i];
+            if (hit.distance <= 0f) continue;
+
+            Health target = hit.collider.GetComponentInParent<Health>();
+            if (target != null && (target == owner || target.IsDead)) continue;
+
+            bool friendly = owner != null && target != null && target.team == owner.team;
+            if (target != null && (!friendly || FriendlyFire))
+                target.TakeDamage(friendly ? damage * FriendlyFireScale : damage, owner, false, false, inAir, false, data);
+
+            shot.end = hit.point;
+            shot.normal = hit.normal;
+            shot.hit = true;
+            shot.target = target;
+            break;
+        }
+
+        AnyShot?.Invoke(shot);
+    }
+
+    // part of the damage left at this distance: 1 up to effectiveRange, then x0.85 for every further effectiveRange,
+    // never below half
+    public float FalloffAt(float distance)
+    {
+        if (effectiveRange <= 0f || distance <= effectiveRange) return 1f;
+        return Mathf.Max(MinFalloff, Mathf.Pow(FalloffPerRange, (distance - effectiveRange) / effectiveRange));
     }
 
     // damage multiplier of the body part that was hit
@@ -270,14 +709,15 @@ public class Weapon : MonoBehaviour
 
         if (hitZone != null)
         {
-            // character model with separate head, body and leg colliders
+            // character model with separate head, chest/arms, stomach and leg colliders
             if (hitZone.zone == BodyZone.Head)
             {
                 head = true;
                 return headMultiplier;
             }
             if (hitZone.zone == BodyZone.Legs) return legMultiplier;
-            return 1f;
+            if (hitZone.zone == BodyZone.Stomach) return stomachMultiplier;
+            return chestMultiplier;
         }
 
         // one collider: decide by the height of the hit
@@ -290,7 +730,8 @@ public class Weapon : MonoBehaviour
             return headMultiplier;
         }
         if (t <= legZoneEnd) return legMultiplier;
-        return 1f;
+        if (t <= stomachZoneEnd) return stomachMultiplier;
+        return chestMultiplier;
     }
 
     // ---------------- penetration ----------------
@@ -350,7 +791,7 @@ public class Weapon : MonoBehaviour
                 // the second player and the next ones are hit through something, so it is a wallbang for them
                 float multiplier = ZoneMultiplier(ZoneHit(hits, i, target), out bool head);
                 if (friendly) multiplier *= FriendlyFireScale;
-                target.TakeDamage(damage * multiplier * left, owner, head, noScope, inAir, passed > 0, data);
+                target.TakeDamage(damage * multiplier * left * FalloffAt(hit.distance), owner, head, noScope, inAir, passed > 0, data);
 
                 bool first = !hitPlayer;
                 if (first)
@@ -362,6 +803,14 @@ public class Weapon : MonoBehaviour
                 // the bullet goes on through the body like through an object;
                 // the damage loss uses the clamped thickness, the overlap with the next objects uses the real one
                 float depth = BodyThickness(hit, direction);
+                // with bone hitboxes the ray crosses several colliders of the same body (arm, chest, arm): the thickness
+                // is from the entry into the first one to the exit from the last one (a capsule has only one collider)
+                for (int j = i + 1; j < hits.Length; j++)
+                {
+                    if (hits[j].distance - hit.distance > BodyMaxThickness) break;
+                    if (hits[j].collider.GetComponentInParent<Health>() != target) continue;
+                    depth = Mathf.Max(depth, hits[j].distance - hit.distance + BodyThickness(hits[j], direction));
+                }
                 bool goesOn = power > 0f && passed < MaxPenetrations;
                 if (goesOn)
                 {
@@ -452,13 +901,14 @@ public class Weapon : MonoBehaviour
     // right click with the knife
     public bool TrySecondary()
     {
-        return IsMelee && !IsDrawing && Melee(true);
+        return !FireBlocked && IsMelee && !IsDrawing && Melee(true);
     }
 
     bool Melee(bool stab)
     {
         if (Time.time < nextShotTime) return false;
         nextShotTime = Time.time + (stab ? data.secondaryInterval : 1f / Mathf.Max(fireRate, 0.01f));
+        lastShotTime = Time.time;
 
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
@@ -473,10 +923,16 @@ public class Weapon : MonoBehaviour
             end = origin + dir * data.meleeRange,
             shooter = owner,
             muzzle = muzzle,
-            melee = true
+            melee = true,
+            stab = stab,
+            weapon = data
         };
 
-        if (Physics.SphereCast(origin, 0.2f, dir, out RaycastHit hit, data.meleeRange))
+        // a slash soon after the previous slash is weaker (CS: 40 the first one, then 25)
+        bool followUp = !stab && data.followUpDamage > 0f && Time.time - lastSlashTime < FollowUpTime;
+        if (!stab) lastSlashTime = Time.time;
+
+        if (MeleeHit(origin, dir, data.meleeRange, out RaycastHit hit))
         {
             Health target = hit.collider.GetComponentInParent<Health>();
             bool friendly = owner != null && target != null && target.team == owner.team;
@@ -484,7 +940,7 @@ public class Weapon : MonoBehaviour
             // a teammate gets hurt only with friendly fire
             if (target != null && owner != null && target != owner && (!friendly || FriendlyFire) && !target.IsDead)
             {
-                float dmg = stab ? data.secondaryDamage : damage;
+                float dmg = stab ? data.secondaryDamage : followUp ? data.followUpDamage : damage;
 
                 Vector3 toTarget = target.transform.position - owner.transform.position;
                 toTarget.y = 0f;
@@ -503,5 +959,29 @@ public class Weapon : MonoBehaviour
 
         AnyShot?.Invoke(shot);
         return true;
+    }
+
+    // the knife: a slash this soon after the previous slash does data.followUpDamage
+    const float FollowUpTime = 0.8f;
+    float lastSlashTime = -10f;
+    static readonly RaycastHit[] meleeHits = new RaycastHit[16];
+
+    // the nearest thing in front of the knife, like one SphereCast, but the attacker's own colliders
+    // (the hitboxes of his model: arms, legs) never stop the blade
+    bool MeleeHit(Vector3 origin, Vector3 dir, float length, out RaycastHit best)
+    {
+        best = default;
+        int n = Physics.SphereCastNonAlloc(origin, 0.2f, dir, meleeHits, length);
+        bool found = false;
+        for (int i = 0; i < n; i++)
+        {
+            RaycastHit h = meleeHits[i];
+            // distance 0: the sphere starts inside this collider (a single SphereCast skips it too)
+            if (h.distance <= 0f || (found && h.distance >= best.distance)) continue;
+            if (owner != null && h.collider.GetComponentInParent<Health>() == owner) continue;
+            best = h;
+            found = true;
+        }
+        return found;
     }
 }

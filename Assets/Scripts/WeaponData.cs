@@ -1,12 +1,17 @@
 using UnityEngine;
 
-public enum WeaponCategory { Pistol, SMG, Rifle, Sniper, Melee }
+// new values are added at the END, so the numbers saved in the existing assets keep their meaning
+public enum WeaponCategory { Pistol, SMG, Rifle, Sniper, Melee, Shotgun, MachineGun, Gear }
+
+// which hand slot a weapon goes to (like CS: 1 primary, 2 pistol, 3 knife / gear)
+public enum WeaponSlot { Primary, Secondary, Knife, Gear }
 
 [CreateAssetMenu(menuName = "Game/Weapon Data", fileName = "NewWeapon")]
 public class WeaponData : ScriptableObject
 {
     public string weaponName = "Weapon";
     public WeaponCategory category;
+    [Tooltip("-1 = both teams can buy it, 0 = only T, 1 = only CT")] public int team = -1;
 
     [Header("Model in the hands (optional)")]
     [Tooltip("your own first person model; empty = the model built from simple shapes. " +
@@ -19,19 +24,46 @@ public class WeaponData : ScriptableObject
     public int killReward = 300;
 
     [Header("Damage")]
+    [Tooltip("base damage without armour (the 'chest and arms' value is about damage x chestMultiplier)")]
     public float damage = 30f;
     public float headMultiplier = 4f;
+    [Tooltip("chest and arms")] public float chestMultiplier = 1f;
+    public float stomachMultiplier = 1.25f;
     public float legMultiplier = 0.75f;
-    public float range = 100f;
+    [Tooltip("0..1, part of the damage that goes through armour (for the economy step)")] [Range(0f, 1f)] public float armorPenetration = 0.775f;
+    [Tooltip("the longest distance a bullet flies, meters")] public float range = 100f;
+    [Tooltip("'Дальность поражения': up to this distance the damage is full, then it falls off, meters")] public float effectiveRange = 30f;
 
     [Header("Fire")]
-    [Tooltip("shots per second")] public float fireRate = 6f;
+    [Tooltip("shots per second (rpm / 60)")] public float fireRate = 6f;
     public bool automatic = false;
     public float drawTime = 0.6f;
+    [Tooltip("bolt action rifle (AWP, SSG 08): the bolt is cycled after every shot")] public bool boltAction;
+    public bool silenced;
+    [Tooltip("two pistols, one in each hand (Dual Berettas)")] public bool dual;
+
+    [Header("Burst mode (Glock-18, FAMAS): right click switches it")]
+    [Tooltip("shots in one burst, 0 = the weapon has no burst mode")] public int burstCount;
+    [Tooltip("shots per second inside a burst")] public float burstFireRate = 20f;
+
+    [Header("Shotgun")]
+    [Tooltip("pellets in one shell, 0 or 1 = a single bullet; damage is per pellet")] public int pellets;
+    [Tooltip("spread of the pellets, degrees")] public float pelletSpread = 3f;
+    [Tooltip("reloads one shell at a time (Nova, XM1014, Sawed-Off)")] public bool shellReload;
+    [Tooltip("time for one shell")] public float shellReloadTime = 0.4f;
+
+    [Header("Revolver R8")]
+    [Tooltip("left click: the hammer is pulled for this time before the shot")] public float fireDelay;
+    [Tooltip("right click fanning: shots per second, 0 = no alternative fire")] public float altFireRate;
+    public float altSpreadMultiplier = 3f;
+
+    [Header("Zeus (taser)")]
+    public bool taser;
+    [Tooltip("seconds until the taser is charged again")] public float rechargeTime = 30f;
 
     [Header("Accuracy")]
     [Tooltip("base spread in degrees, the player stance multiplies it")] public float spreadAngle = 1f;
-    [Tooltip("camera kick multiplier")] public float recoil = 1f;
+    [Tooltip("camera kick multiplier ('Отдача' in % is the opposite: more % = less kick)")] public float recoil = 1f;
     [Tooltip("penetration power: how much 'strength x meters' of objects a bullet can go through (see Penetrable)")]
     public float penetration = 1.5f;
 
@@ -41,7 +73,8 @@ public class WeaponData : ScriptableObject
     public float reloadTime = 2.4f;
 
     [Header("Movement")]
-    [Tooltip("1 = full speed")] public float moveSpeedFactor = 1f;
+    [Tooltip("1 = full speed (CS units: speed / 250)")] public float moveSpeedFactor = 1f;
+    [Tooltip("speed factor while firing (R8, G3SG1); 0 = same as moveSpeedFactor")] public float firingMoveSpeedFactor;
 
     [Header("Melee (knife)")]
     public bool melee;
@@ -49,6 +82,8 @@ public class WeaponData : ScriptableObject
     [Tooltip("right click stab")] public float secondaryDamage = 65f;
     public float secondaryInterval = 1f;
     [Tooltip("stab in the back, a slash in the back does half")] public float backstabDamage = 180f;
+    [Tooltip("a slash soon after the previous slash (CS: the first one 40, the next ones 25); 0 = every slash does 'damage'")]
+    public float followUpDamage;
 
     [Header("Scope (leave empty if no scope)")]
     [Tooltip("camera FOV for each zoom level, e.g. 40 and 10")] public float[] scopeFov;
@@ -56,4 +91,23 @@ public class WeaponData : ScriptableObject
     [Tooltip("minimum spread in degrees when not scoped, so a no-scope shot is never perfectly accurate")] public float unscopedMinSpread = 1.2f;
     [Tooltip("speed multiplier while scoped")] public float scopedMoveFactor = 0.5f;
     [Tooltip("spread in degrees while scoped and running at full speed, smaller when walking slowly")] public float scopedMoveSpread = 3f;
+    [Tooltip("the scope is a red dot / small optic (SG 553, AUG): no black mask, the gun stays visible")] public bool scopeIsOptic;
+
+    // the hand slot of this weapon
+    public WeaponSlot Slot
+    {
+        get
+        {
+            switch (category)
+            {
+                case WeaponCategory.Pistol: return WeaponSlot.Secondary;
+                case WeaponCategory.Melee: return WeaponSlot.Knife;
+                case WeaponCategory.Gear: return WeaponSlot.Gear;
+                default: return WeaponSlot.Primary;
+            }
+        }
+    }
+
+    public bool IsShotgun => pellets > 1;
+    public bool HasScope => scopeFov != null && scopeFov.Length > 0;
 }

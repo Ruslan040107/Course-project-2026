@@ -116,7 +116,8 @@ public class PlayerController : MonoBehaviour
 
     void OnShot(ShotInfo shot)
     {
-        if (health == null || shot.shooter != health || shot.melee) return;
+        // a shotgun shell kicks once: the other pellets of the shot are skipped
+        if (health == null || shot.shooter != health || shot.melee || shot.pellet) return;
 
         if (Time.time - lastShotTime > sprayResetTime) sprayIndex = 0;
         lastShotTime = Time.time;
@@ -136,7 +137,8 @@ public class PlayerController : MonoBehaviour
     void Update()
     {
         // Escape and the cursor belong to MainMenu (pause menu); without it Escape frees the cursor and a click takes it back
-        if (!MainMenu.Active)
+        // (the buy menu keeps the cursor free while it is open)
+        if (!MainMenu.Active && !BuyMenu.IsOpen)
         {
             if (Input.GetKeyDown(KeyCode.Escape))
             {
@@ -192,7 +194,8 @@ public class PlayerController : MonoBehaviour
 
         if (weapon != null)
         {
-            f *= weapon.moveSpeedFactor;
+            // slower while firing for some weapons (R8, G3SG1), see Weapon.CurrentMoveSpeedFactor
+            f *= weapon.CurrentMoveSpeedFactor;
             if (shoot != null && shoot.IsScoped && weapon.data != null) f *= weapon.data.scopedMoveFactor;
         }
 
@@ -222,14 +225,26 @@ public class PlayerController : MonoBehaviour
         spreadNow = Mathf.MoveTowards(spreadNow, target, spreadChangeSpeed * Time.deltaTime);
     }
 
+    // a new round: the view looks straight ahead again (RoundManager turns the body towards the map centre)
+    public void ResetLook()
+    {
+        pitch = 0f;
+        kickPitch = 0f;
+        kickYaw = 0f;
+        kickRoll = 0f;
+    }
+
     void Look()
     {
         float sens = GameSettings.Sensitivity * (shoot != null ? shoot.SensitivityFactor : 1f);
+        // the own sensitivity of the zoom (scopes and optics), on top of the scope's FOV factor
+        if (shoot != null && shoot.IsScoped) sens *= GameSettings.ZoomSensitivity;
         float mx = Input.GetAxis("Mouse X") * sens;
         float my = Input.GetAxis("Mouse Y") * sens;
 
-        // locking the cursor after a menu can give one big mouse jump
-        if (Time.frameCount - MainMenu.LastClosedFrame <= 1)
+        // locking the cursor after a menu can give one big mouse jump;
+        // the mouse moves the cursor of the buy menu, not the view (like in CS)
+        if (BuyMenu.IsOpen || Time.frameCount - MainMenu.LastClosedFrame <= 1)
         {
             mx = 0f;
             my = 0f;
@@ -255,6 +270,14 @@ public class PlayerController : MonoBehaviour
         float x = Input.GetAxis("Horizontal");
         float z = Input.GetAxis("Vertical");
 
+        // freeze time at the round start: no walking and no jumping, looking around and crouching still work
+        bool frozen = RoundManager.InFreezeTime;
+        if (frozen)
+        {
+            x = 0f;
+            z = 0f;
+        }
+
         Vector3 move = transform.right * x + transform.forward * z;
         if (move.magnitude > 1f) move.Normalize();
         moveAmount = move.magnitude;
@@ -266,7 +289,7 @@ public class PlayerController : MonoBehaviour
             verticalVelocity = -2f;
 
         // with the bhop upgrade holding Jump keeps hopping, and every chained jump adds speed
-        bool jumpPressed = bhopOn ? Input.GetButton("Jump") : Input.GetButtonDown("Jump");
+        bool jumpPressed = !frozen && (bhopOn ? Input.GetButton("Jump") : Input.GetButtonDown("Jump"));
 
         if (controller.isGrounded && jumpPressed)
         {

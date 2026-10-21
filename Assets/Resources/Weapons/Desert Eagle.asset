@@ -14,27 +14,52 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::WeaponData
   weaponName: Desert Eagle
   category: 0
+  team: -1
+  viewModelPrefab: {fileID: 0}
   price: 700
   killReward: 300
-  damage: 63
-  headMultiplier: 4
-  legMultiplier: 0.75
+  damage: 73
+  headMultiplier: 3.4246576
+  chestMultiplier: 0.84931505
+  stomachMultiplier: 1.0547945
+  legMultiplier: 0.63013697
+  armorPenetration: 0.932
   range: 100
-  fireRate: 4.5
+  effectiveRange: 35
+  fireRate: 4.45
   automatic: 0
   drawTime: 0.6
+  boltAction: 0
+  silenced: 0
+  dual: 0
+  burstCount: 0
+  burstFireRate: 20
+  pellets: 0
+  pelletSpread: 3
+  shellReload: 0
+  shellReloadTime: 0.4
+  fireDelay: 0
+  altFireRate: 0
+  altSpreadMultiplier: 3
+  taser: 0
+  rechargeTime: 30
   spreadAngle: 0.8
-  recoil: 2
+  recoil: 1.808
   penetration: 2
   magazineSize: 7
   reserveAmmo: 35
   reloadTime: 2.2
   moveSpeedFactor: 0.92
+  firingMoveSpeedFactor: 0
   melee: 0
   meleeRange: 2
   secondaryDamage: 65
   secondaryInterval: 1
   backstabDamage: 180
+  followUpDamage: 0
   scopeFov: []
   unscopedSpreadMultiplier: 1
+  unscopedMinSpread: 1.2
   scopedMoveFactor: 0.5
+  scopedMoveSpread: 3
+  scopeIsOptic: 0

@@ -18,8 +18,13 @@ public class PlayerShoot : MonoBehaviour
     float boltUntil;
     WeaponData lastData;
     Texture2D scopeTexture;
+    Texture2D dotTexture;
+    Texture2D opticTexture;
 
     public bool IsScoped => zoomLevel > 0;
+
+    // zoomed with an optic (SG 553, AUG): no black scope mask; ViewModel raises the gun to the eye, then OnGUI draws the optic view
+    public bool IsOpticZoom => zoomLevel > 0 && weapon != null && weapon.HasOpticScope;
 
     // mouse sensitivity multiplier while zoomed
     public float SensitivityFactor
@@ -40,8 +45,14 @@ public class PlayerShoot : MonoBehaviour
     float ScopeFov(int level)
     {
         if (level <= 0 || level > ScopeLevels()) return -1f;
-        return weapon.data.scopeFov[level - 1];
+        // the asset values are for the default FOV (90 horizontal); keep the same zoom ratio at any FOV setting,
+        // so a narrow FOV setting still zooms in and the scope overlay is drawn
+        float defaultFov = Camera.HorizontalToVerticalFieldOfView(GameSettings.DefaultFov, 16f / 9f);
+        return weapon.data.scopeFov[level - 1] * baseFov / defaultFov;
     }
+
+    // the right mouse button zooms only if it has no other job (knife stab, burst mode switch, R8 fanning)
+    bool RightClickZooms => weapon != null && !weapon.IsMelee && !weapon.HasBurstMode && !weapon.HasAltFire;
 
     public void ResetZoom()
     {
@@ -78,10 +89,12 @@ public class PlayerShoot : MonoBehaviour
 
     void OnShot(ShotInfo s)
     {
-        if (health == null || s.shooter != health || s.melee) return;
+        // one trigger pull counts once: the other pellets of a shotgun shell are skipped
+        if (health == null || s.shooter != health || s.melee || s.pellet) return;
 
-        // scoped sniper: leave the scope while the next round is loaded, then return to the same zoom
-        if (desiredZoom > 0 && ScopeLevels() > 0)
+        // bolt-action sniper (AWP, SSG 08): leave the scope while the next round is loaded, then return to the same zoom;
+        // auto-snipers (SCAR-20, G3SG1) and optics (SG 553, AUG) stay zoomed
+        if (desiredZoom > 0 && ScopeLevels() > 0 && weapon.BoltAction)
             boltUntil = Time.time + 1f / Mathf.Max(weapon.fireRate, 0.01f);
     }
 
@@ -117,10 +130,10 @@ public class PlayerShoot : MonoBehaviour
         if (weapon == null) return;
 
         bool dead = health != null && health.IsDead;
-        int levels = ScopeLevels();
+        int levels = RightClickZooms ? ScopeLevels() : 0;
 
         // GameHud draws the crosshair (none for sniper rifles, only the scope): the canvas image stays hidden;
-        // without GameHud the old image is used as before
+        // without GameHud the old image is used as before (an optic rifle keeps it until it zooms)
         if (crosshair != null)
         {
             if (GameHud.Active)
@@ -129,7 +142,7 @@ public class PlayerShoot : MonoBehaviour
             }
             else if (!dead)
             {
-                crosshair.SetActive(levels == 0);
+                crosshair.SetActive(!weapon.HasSniperScope && zoomLevel == 0);
             }
         }
 
@@ -152,6 +165,13 @@ public class PlayerShoot : MonoBehaviour
         weapon.Scoped = zoomLevel > 0;
         ApplyFov();
 
+        // R8: fanning spread for the crosshair while right click is held; letting go of the left button (or a menu taking the
+        // cursor) before the hammer is fully pulled cancels the shot
+        weapon.AltFireHeld = !dead && weapon.HasAltFire && !weapon.HasBurstMode && Cursor.lockState == CursorLockMode.Locked
+            && Input.GetMouseButton(1) && !Input.GetButton("Fire1");
+        if (!dead && weapon.IsHammerPulling && (!Input.GetButton("Fire1") || Cursor.lockState != CursorLockMode.Locked))
+            weapon.CancelHammer();
+
         if (dead) return;
         if (Cursor.lockState != CursorLockMode.Locked) return;
         // the click that took the cursor back (or closed a menu) is not a shot
@@ -166,7 +186,22 @@ public class PlayerShoot : MonoBehaviour
             return;
         }
 
-        bool pressed = weapon.automatic
+        // right click: burst mode switch (Glock-18, FAMAS) or R8 fanning while it is held
+        if (weapon.HasBurstMode)
+        {
+            if (Input.GetMouseButtonDown(1)) weapon.ToggleBurstMode();
+        }
+        else if (weapon.HasAltFire && Input.GetMouseButton(1) && !Input.GetButton("Fire1"))
+        {
+            weapon.TryAltFire();
+            return;
+        }
+
+        // the R8 hammer is pulled while the button is held, then it fires (and pulls again);
+        // in burst mode every press fires one burst, also with the automatic FAMAS
+        bool burst = weapon.BurstMode && weapon.HasBurstMode;
+        bool hold = (weapon.automatic && !burst) || weapon.fireDelay > 0f;
+        bool pressed = hold
             ? Input.GetButton("Fire1")
             : Input.GetButtonDown("Fire1");
 
@@ -186,8 +221,21 @@ public class PlayerShoot : MonoBehaviour
 
     void OnGUI()
     {
-        if (zoomLevel == 0 || currentFov > baseFov - 8f) return;
+        if (zoomLevel == 0) return;
         if (weapon == null || weapon.IsDrawing) return;
+
+        // optic: a round view with darkened edges (ViewModel hides the gun once it is at the eye) and a red dot
+        if (IsOpticZoom)
+        {
+            if (currentFov < baseFov - 4f)
+            {
+                DrawOpticView();
+                DrawOpticDot();
+            }
+            return;
+        }
+
+        if (currentFov > baseFov - 8f) return;
 
         if (scopeTexture == null) scopeTexture = MakeScopeTexture();
 
@@ -228,6 +276,91 @@ public class PlayerShoot : MonoBehaviour
         GUI.color = new Color(0f, 0f, 0f, alpha);
         GUI.DrawTexture(new Rect(cx - half, cy - thick * 0.5f, half * 2f, thick), Texture2D.whiteTexture);
         GUI.DrawTexture(new Rect(cx - thick * 0.5f, cy - half, thick, half * 2f), Texture2D.whiteTexture);
+    }
+
+    // the view through an optic (SG 553, AUG): a clear circle, a dark rim and a dimmed area around it
+    void DrawOpticView()
+    {
+        if (opticTexture == null) opticTexture = MakeOpticTexture();
+
+        float size = Screen.height;
+        float x = (Screen.width - size) * 0.5f;
+
+        GUI.color = Color.white;
+        GUI.DrawTexture(new Rect(x, 0f, size, size), opticTexture);
+
+        GUI.color = new Color(0f, 0f, 0f, OpticOutsideAlpha);
+        GUI.DrawTexture(new Rect(0f, 0f, x, Screen.height), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(x + size, 0f, x, Screen.height), Texture2D.whiteTexture);
+        GUI.color = Color.white;
+    }
+
+    const float OpticOutsideAlpha = 0.82f;
+
+    // clear up to 78% of the half size, a dark rim, then the dimmed outside
+    Texture2D MakeOpticTexture()
+    {
+        const int n = 512;
+        Texture2D tex = new Texture2D(n, n, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 c = new Vector2(n - 1, n - 1) * 0.5f;
+        for (int y = 0; y < n; y++)
+        {
+            for (int x = 0; x < n; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x, y), c) / (n * 0.5f);
+                // a soft vignette inside the glass, a dark rim, the dimmed outside
+                float inner = Mathf.Clamp01((d - 0.6f) / 0.18f) * 0.25f;
+                float rim = Mathf.Clamp01(1f - Mathf.Abs(d - 0.8f) / 0.025f);
+                float outside = d > 0.8f ? OpticOutsideAlpha : 0f;
+                float a = Mathf.Max(Mathf.Max(inner, rim * 0.95f), outside);
+                tex.SetPixel(x, y, new Color(0f, 0f, 0f, a));
+            }
+        }
+
+        tex.Apply();
+        return tex;
+    }
+
+    // the red dot of an optic in the middle of the screen, with a dark edge
+    void DrawOpticDot()
+    {
+        if (dotTexture == null) dotTexture = MakeDotTexture();
+
+        float k = Screen.height / 1080f;
+        float cx = Screen.width * 0.5f;
+        float cy = Screen.height * 0.5f;
+        float dot = Mathf.Max(3f, Mathf.Round(6f * k));
+        float edge = dot + 2f * Mathf.Max(1f, Mathf.Round(1.5f * k));
+
+        GUI.color = new Color(0f, 0f, 0f, 0.55f);
+        GUI.DrawTexture(new Rect(cx - edge * 0.5f, cy - edge * 0.5f, edge, edge), dotTexture);
+        GUI.color = new Color(1f, 0.12f, 0.08f, 0.95f);
+        GUI.DrawTexture(new Rect(cx - dot * 0.5f, cy - dot * 0.5f, dot, dot), dotTexture);
+        GUI.color = Color.white;
+    }
+
+    // a white disc with a soft edge (tinted by GUI.color)
+    Texture2D MakeDotTexture()
+    {
+        const int n = 32;
+        Texture2D tex = new Texture2D(n, n, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 c = new Vector2(n - 1, n - 1) * 0.5f;
+        for (int y = 0; y < n; y++)
+        {
+            for (int x = 0; x < n; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x, y), c) / (n * 0.5f);
+                float a = Mathf.Clamp01((1f - d) / 0.15f);
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+            }
+        }
+
+        tex.Apply();
+        return tex;
     }
 
     // black mask with a clear circle in the middle (about 82% of the screen height)

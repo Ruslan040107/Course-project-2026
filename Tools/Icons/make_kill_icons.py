@@ -9,12 +9,18 @@
 import bpy, sys, os, math, tempfile, mathutils
 import numpy as np
 
-NAMES = ["AK-47", "M4A4", "AWP", "MP9", "Glock-18", "USP-S", "Desert Eagle", "Knife"]
+NAMES = ["Glock-18", "USP-S", "P2000", "P250", "Dual Berettas", "CZ75-Auto", "Tec-9", "Five-SeveN",
+         "R8 Revolver", "Desert Eagle", "MAC-10", "UMP-45", "MP9", "PP-Bizon", "MP7", "MP5-SD", "P90",
+         "Nova", "Sawed-Off", "MAG-7", "XM1014", "Negev", "M249", "Galil AR", "FAMAS", "AK-47", "M4A1-S",
+         "M4A4", "SG 553", "AUG", "SSG 08", "AWP", "SCAR-20", "G3SG1", "Knife", "Zeus x27"]
 HEIGHT = 48          # icon height in pixels
 PAD = 2              # transparent border
 RENDER_PX = 480      # height of the silhouette in the big render (downscaled later)
-# part of the icon height the silhouette may use (the knife is long and thin, it would be as wide as the AWP)
-FILL = {"Knife": 0.62}
+MAX_WIDTH = 220      # long thin guns (shotguns) are made smaller instead of wider than the AWP icon
+# part of the icon height the silhouette may use
+FILL = {"Knife": 0.8, "Zeus x27": 0.85}
+# the butterfly knife: its handles are opened this much (degrees) on the icon, a "Y" instead of a thin line
+SPLAY = {"Knife": 24}
 
 V = mathutils.Vector
 here = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +50,20 @@ def axes(objs):
         # no empties: the longest horizontal side of the bounding box, towards +
         fwd = V((1, 0, 0))
     return fwd, up
+
+
+def splay(objs, fwd, up, deg):
+    # turns HandleA and HandleB (their origins are on the pins) apart, around the axis across the blade
+    side = up.cross(fwd)
+    for o in objs:
+        nm = o.name.split(".")[0]
+        if nm not in ("HandleA", "HandleB"):
+            continue
+        a = math.radians(deg if nm == "HandleA" else -deg)
+        p = o.matrix_world.translation.copy()
+        o.matrix_world = (mathutils.Matrix.Translation(p) @ mathutils.Matrix.Rotation(a, 4, side)
+                          @ mathutils.Matrix.Translation(-p) @ o.matrix_world)
+    bpy.context.view_layer.update()
 
 
 def render_alpha(objs, fwd, up, path):
@@ -117,6 +137,9 @@ def make_icon(alpha, fill):
     inner = HEIGHT - 2 * PAD
     th = max(4, int(round(inner * fill)))
     tw = max(4, int(round(a.shape[1] * th / a.shape[0])))
+    if tw > MAX_WIDTH - 2 * PAD:
+        tw = MAX_WIDTH - 2 * PAD
+        th = max(4, int(round(a.shape[0] * tw / a.shape[1])))
     small = area_weights(a.shape[0], th) @ a @ area_weights(a.shape[1], tw).T
     icon = np.zeros((HEIGHT, tw + 2 * PAD), dtype=np.float64)
     top = PAD + (inner - th) // 2
@@ -155,6 +178,8 @@ for name in names:
         print("ICON skip (no mesh):", name)
         continue
     fwd, up = axes(objs)
+    if name in SPLAY:
+        splay(objs, fwd, up, SPLAY[name])
     alpha = render_alpha(objs, fwd, up, tmp)
     icon = make_icon(alpha, FILL.get(name, 1.0))
     path = os.path.join(out, name + ".png")

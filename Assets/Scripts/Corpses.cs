@@ -10,9 +10,11 @@ using UnityEngine;
 // - Without one (capsules) the fall is scripted, without physics, so every body really ends up lying: it turns
 //   90 degrees around its foot, speeding up like under gravity, lands on the floor below (also on a slope)
 //   and bounces a little. If a wall is in the way, the body falls to a free side instead.
-// A body seen only by its shadow (the player's own model) is fully visible when it lies.
-// The copy has no colliders and is on the Ignore Raycast layer, so bullets, bot vision
-// and living players go through it. CombatEffects adds this component (never in simulation).
+// A body hidden from the camera it was seen from (the player's own model on the LocalBody layer) is fully visible
+// when it lies: the copy is on the Ignore Raycast layer.
+// The copy is made from the prefab, so it has none of the hitboxes of the living model (CharacterBody): no colliders
+// and no rigidbody at all, so bullets, bot vision and living players go through it.
+// CombatEffects adds this component (never in simulation).
 public class Corpses : MonoBehaviour
 {
     public int maxBodies = 12;
@@ -246,7 +248,8 @@ public class Corpses : MonoBehaviour
         Health victim = k.victim;
         Transform src = cb.Model;
         Vector3 feet = src.position;
-        Vector3 forward = src.forward;
+        // where the living model faced (it turns to the aim or the run, see CharacterBody)
+        Vector3 forward = cb.Forward;
         forward.y = 0f;
         if (forward.sqrMagnitude < 0.0001f) forward = Vector3.forward;
         forward.Normalize();
@@ -288,6 +291,9 @@ public class Corpses : MonoBehaviour
             }
         }
 
+        // a body never has colliders (hitboxes) or a rigidbody, whatever the model brings
+        foreach (Collider c in b.go.GetComponentsInChildren<Collider>(true)) Destroy(c);
+        foreach (Rigidbody rb in b.go.GetComponentsInChildren<Rigidbody>(true)) Destroy(rb);
         foreach (Transform t in model.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = IgnoreRaycastLayer;
         foreach (Renderer r in model.GetComponentsInChildren<Renderer>(true))
         {
