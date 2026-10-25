@@ -30,6 +30,9 @@ public class Health : MonoBehaviour
     public event System.Action<float, Health, bool> DamageTaken;
     // training target: takes damage (and reports it) but never dies
     public bool invulnerable;
+    // developer console "god": the same for the player, but he still counts as a player (the HUD, the scoreboard and
+    // the menus skip invulnerable ones as the training target)
+    [System.NonSerialized] public bool godMode;
 
     public const float AssistDamage = 41f;
 
@@ -139,7 +142,7 @@ public class Health : MonoBehaviour
 
         DamageTaken?.Invoke(pendingDamage, pendingAttacker, pendingHeadshot);
 
-        if (invulnerable)
+        if (invulnerable || godMode)
         {
             pendingDamage = 0f;
             ClearPending();

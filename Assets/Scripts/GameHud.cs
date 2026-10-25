@@ -5,8 +5,9 @@ using UnityEngine.SceneManagement;
 // CS2-like HUD of the human player (IMGUI). Sizes scale with the screen height (made for 1080p).
 // - Bottom left: health with a cross (red below 25) and, with the bhop upgrade, the speed bonus;
 //   above them the money ("$ 800", only with the economy on) with "+$300  Убийство противника" popups
-//   (Economy.MoneyChanged) and the buy hint "B закупка 0:15" while Economy.CanBuy (always in solo);
-//   in the buy time outside the own buy zone a dim "вне зоны закупки" instead.
+//   (Economy.MoneyChanged) and the buy hint "B закупка 0:15" while Economy.CanBuy (always in solo; no time
+//   after the buy time with the console's "buyanywhere"); in the buy time outside the own buy zone a dim
+//   "вне зоны закупки" instead. The hint hides while the buy menu or the developer console is open.
 // - Bottom right: ammo (shotgun shells are just the number), weapon name and the reload bar; the fire mode
 //   of the Glock-18 / FAMAS ("ОЧЕРЕДЬ" / "АВТО" / "ПОЛУАВТО"), the charge bar of the Zeus. PlayerLoadout draws
 //   the weapon slots above it for a moment after a switch. While the dead player watches a teammate,
@@ -37,8 +38,9 @@ public class GameHud : MonoBehaviour
     public static float BottomBoxTop => Screen.height - (Margin + BoxHeight) * Scale;
 
     [Header("Dynamic crosshair (the shape itself is in the settings, see GameSettings)")]
-    [Tooltip("extra gap for every shot, pixels at 1080p, it closes again quickly")] public float shotBloom = 4f;
-    public float maxShotBloom = 14f;
+    // small: Weapon.CurrentSpread already grows with every shot of the player (the real inaccuracy of the next one)
+    [Tooltip("extra gap for every shot, pixels at 1080p, it closes again quickly")] public float shotBloom = 1.5f;
+    public float maxShotBloom = 6f;
     [Tooltip("pixels per second")] public float bloomRecovery = 45f;
 
     [Header("Damage direction")]
@@ -396,6 +398,8 @@ public class GameHud : MonoBehaviour
         GUI.depth = 5;
         if (Event.current.type != EventType.Repaint) return;
         if (Time.timeScale == 0f || player == null || !player.gameObject.activeInHierarchy) return;
+        // the buy menu covers the screen like in CS:GO: no HUD under it (it shows the money and the time itself)
+        if (BuyMenu.IsOpen) return;
 
         float k = Scale;
         BuildStyles(k);
@@ -561,13 +565,14 @@ public class GameHud : MonoBehaviour
     {
         bool showMoney = Economy.Enabled && health != null;
         // the same rule as BuyMenu: Economy.CanBuy (without the economy, in solo, buying never ends; otherwise
-        // the buy time, the freeze time included, inside the own buy zone) in a running round.
-        // In the buy time outside the zone a dim note instead of the hint.
+        // the buy time, the freeze time included, inside the own buy zone) in a running round
+        // (the console's "buyanywhere" also between rounds). In the buy time outside the zone a dim note instead.
         bool free = !Economy.Enabled;
-        bool running = free || rounds == null || (!rounds.InBreak && !rounds.MatchOver);
+        bool running = free || Economy.BuyAnywhere || rounds == null || (!rounds.InBreak && !rounds.MatchOver);
         bool canBuy = alive && health != null && running && Economy.CanBuy(health);
         bool away = alive && !free && health != null && running && Economy.InBuyTime && !Economy.InBuyZone(health);
-        bool buy = (canBuy || away) && !BuyMenu.IsOpen;
+        // hidden while the buy menu or the developer console is open
+        bool buy = (canBuy || away) && !BuyMenu.IsOpen && !DevConsole.IsOpen;
         bool inZone = canBuy;
         if (!showMoney && !buy) return;
 
@@ -642,7 +647,8 @@ public class GameHud : MonoBehaviour
         }
 
         string text = "закупка";
-        if (!free)
+        // "buyanywhere" of the console keeps buying open after the buy time: no "0:00" then
+        if (!free && Economy.InBuyTime)
         {
             int s = Mathf.CeilToInt(Economy.BuyTimeLeft);
             if (s != buySeconds)

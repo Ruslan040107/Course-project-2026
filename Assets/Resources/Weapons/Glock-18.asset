@@ -24,7 +24,7 @@ MonoBehaviour:
   stomachMultiplier: 1.2333333
   legMultiplier: 0.73333335
   armorPenetration: 0.47
-  range: 100
+  range: 250
   effectiveRange: 20
   fireRate: 6.6666665
   automatic: 0
@@ -46,6 +46,13 @@ MonoBehaviour:
   spreadAngle: 1
   recoil: 0.656
   penetration: 0.8
+  standInaccuracy: 0.42
+  crouchInaccuracy: 0.32
+  moveInaccuracy: 2.5
+  inaccuracyPerShot: 1
+  recoveryTime: 0.3
+  recoilPattern: 4
+  recoilScale: 3.94
   magazineSize: 20
   reserveAmmo: 120
   reloadTime: 2.2

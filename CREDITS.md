@@ -1,6 +1,6 @@
 # Источники ассетов
 
-Все сторонние ассеты — под лицензией **CC0** (общественное достояние): их можно использовать и изменять без ограничений, указание авторства не требуется, но мы его указываем. Файлов Valve / CS 2 в проекте нет.
+Все сторонние ассеты — под лицензией **CC0** (общественное достояние): их можно использовать и изменять без ограничений, указание авторства не требуется, но мы его указываем.
 
 ## Модели оружия
 **Ultimate Gun Pack** — Quaternius (quaternius.com), CC0. Скачано с poly.pizza (зеркало автора).
@@ -151,7 +151,7 @@
 
 ## Звук победы в раунде
 `Assets/Resources/Audio/RoundEnd/Default/t_win`, `ct_win` — **Music Jingles**, Kenney (kenney.nl/assets/music-jingles), CC0: jingles_HIT03 и jingles_HIT11 (`Tools/Audio/make_round_end_sounds.py`).
-Свои клипы автора (`Audio/RoundEnd/Local/`, если есть) играют вместо них; эта папка не публикуется (.gitignore).
+Клипы автора `Audio/RoundEnd/Local/t_win`, `ct_win` (фразы победы T / CT из CS, скачаны автором с lightaudio.ru) играют вместо них; лежат в репозитории по решению автора.
 
 ## Текстуры карты
 **ambientCG** (ambientcg.com), CC0, 1K-JPG: Bricks084, Plaster007, Ground079S, PavingStones150, Tiles143, WoodFloor043, CorrugatedSteel005, Concrete046.

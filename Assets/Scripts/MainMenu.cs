@@ -11,10 +11,14 @@ using UnityEngine.SceneManagement;
 //   Choosing a mode always (re)loads its scene; RoundManager takes GameSettings.PendingSolo,
 //   PendingBotsPerTeam and BotsFrozen when the match starts.
 // - Pause: Escape during play. Escape again or "Продолжить" goes back to the game.
-// - Settings in two columns: "Игра" (mouse sensitivity, sensitivity in the zoom, FOV, volume, radar) with a live preview of the crosshair
-//   under it, and "Прицел" (style, colour, size, gap, thickness, length, outline, dynamic; GameHud draws it).
-//   A narrow screen gets one scrolling column. Changes work at once,
-//   "Сохранить" writes them to PlayerPrefs, "Назад" (or Escape) drops the unsaved ones.
+//   The Escape that closes the buy menu or the developer console does not open the pause.
+// - Settings in two columns: on the left "Игра" (mouse sensitivity, sensitivity in the zoom, FOV, volume),
+//   "Радар" (on/off, size on the screen, zoom) and a live preview of the crosshair; on the right "Прицел"
+//   (style, colour, size, gap, thickness, length, outline, dynamic; GameHud draws it) and "Экран" (window mode:
+//   windowed / full screen / borderless full screen, resolution from the monitor's list, the current one marked).
+//   A narrow or low screen gets one scrolling column. Changes work at once, except the screen mode and
+//   resolution: they go on the window when saved. "Сохранить" writes everything to PlayerPrefs,
+//   "Назад" (or Escape) drops the unsaved changes, "По умолчанию" resets everything but the screen.
 // While a menu is open the game is paused (Time.timeScale = 0, sound paused) and the cursor is free:
 // PlayerShoot and PlayerLoadout only work with a locked cursor, PlayerController skips look and movement.
 // The FOV setting is put on the camera by PlayerShoot itself (it listens to GameSettings.Changed and zooms from it).
@@ -48,6 +52,7 @@ public class MainMenu : MonoBehaviour
     bool mainFromPause;              // the main menu was opened from the pause: Escape goes back there
     bool desertAvailable;
     float savedUntil;                // "Настройки сохранены" is shown until this unscaled time
+    int consoleFrame = -10;          // the last frame the developer console was seen open
 
     RoundManager rounds;
 
@@ -63,8 +68,13 @@ public class MainMenu : MonoBehaviour
         public CrosshairStyle crosshairStyle;
         public float crosshairGap, crosshairThickness, crosshairLength;
         public bool crosshairOutline, crosshairDynamic;
+        public float radarSize, radarZoom;
+        public GameSettings.DisplayMode display;
+        public int screenWidth, screenHeight;
     }
     Snapshot snapshot;
+    // the sizes of the resolution row (built when the settings open)
+    System.Collections.Generic.List<Vector2Int> screenSizes;
 
     // look
     static readonly Color Accent = new Color(0.96f, 0.64f, 0.2f, 1f);
@@ -285,6 +295,9 @@ public class MainMenu : MonoBehaviour
     void OpenSettings(Page from)
     {
         settingsBack = from;
+        // the window may have changed since the last save (Alt+Enter, the command line): show it as it is
+        GameSettings.ReadDisplay();
+        screenSizes = GameSettings.ScreenSizes();
         snapshot = Take();
         savedUntil = 0f;
         page = Page.Settings;
@@ -321,8 +334,13 @@ public class MainMenu : MonoBehaviour
             Cursor.visible = true;
         }
 
-        // the Escape that closes the buy menu (BuyMenu.IsOpen is still true in that frame) does not open the pause
-        if (Input.GetKeyDown(KeyCode.Escape) && !BuyMenu.IsOpen)
+        // the developer console owns the keyboard: it may close in this frame before or after this Update,
+        // so open now or in the last frame counts as open
+        bool console = DevConsole.IsOpen || consoleFrame >= Time.frameCount - 1;
+        if (DevConsole.IsOpen) consoleFrame = Time.frameCount;
+
+        // the Escape that closes the buy menu (BuyMenu.IsOpen is still true in that frame) or the console does not open the pause
+        if (Input.GetKeyDown(KeyCode.Escape) && !BuyMenu.IsOpen && !console)
         {
             switch (page)
             {
@@ -338,10 +356,10 @@ public class MainMenu : MonoBehaviour
                     break;
             }
         }
-        else if (page == Page.None && !BuyMenu.IsOpen && Cursor.lockState != CursorLockMode.Locked && Input.GetMouseButtonDown(0))
+        else if (page == Page.None && !BuyMenu.IsOpen && !console && Cursor.lockState != CursorLockMode.Locked && Input.GetMouseButtonDown(0))
         {
             // the cursor got free without the menu (for example the window lost focus): a click takes it back
-            // (not while the buy menu is open: its clicks buy weapons)
+            // (not while the buy menu or the console is open: their clicks are theirs)
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
             LastClosedFrame = Time.frameCount;
@@ -366,6 +384,11 @@ public class MainMenu : MonoBehaviour
         s.crosshairLength = GameSettings.CrosshairLength;
         s.crosshairOutline = GameSettings.CrosshairOutline;
         s.crosshairDynamic = GameSettings.CrosshairDynamic;
+        s.radarSize = GameSettings.RadarSize;
+        s.radarZoom = GameSettings.RadarZoom;
+        s.display = GameSettings.Display;
+        s.screenWidth = GameSettings.ScreenWidth;
+        s.screenHeight = GameSettings.ScreenHeight;
         return s;
     }
 
@@ -384,11 +407,25 @@ public class MainMenu : MonoBehaviour
         GameSettings.CrosshairLength = s.crosshairLength;
         GameSettings.CrosshairOutline = s.crosshairOutline;
         GameSettings.CrosshairDynamic = s.crosshairDynamic;
+        GameSettings.RadarSize = s.radarSize;
+        GameSettings.RadarZoom = s.radarZoom;
+        GameSettings.Display = s.display;
+        GameSettings.ScreenWidth = s.screenWidth;
+        GameSettings.ScreenHeight = s.screenHeight;
+    }
+
+    // the screen mode or resolution was changed and is not saved (it goes on the window only when saved)
+    bool ScreenDirty()
+    {
+        return GameSettings.Display != snapshot.display
+            || GameSettings.ScreenWidth != snapshot.screenWidth
+            || GameSettings.ScreenHeight != snapshot.screenHeight;
     }
 
     bool Dirty()
     {
         const float e = 0.0001f;
+        if (ScreenDirty()) return true;
         return Mathf.Abs(GameSettings.Sensitivity - snapshot.sensitivity) > e
             || Mathf.Abs(GameSettings.ZoomSensitivity - snapshot.zoomSensitivity) > e
             || Mathf.Abs(GameSettings.Fov - snapshot.fov) > e
@@ -401,7 +438,9 @@ public class MainMenu : MonoBehaviour
             || Mathf.Abs(GameSettings.CrosshairThickness - snapshot.crosshairThickness) > e
             || Mathf.Abs(GameSettings.CrosshairLength - snapshot.crosshairLength) > e
             || GameSettings.CrosshairOutline != snapshot.crosshairOutline
-            || GameSettings.CrosshairDynamic != snapshot.crosshairDynamic;
+            || GameSettings.CrosshairDynamic != snapshot.crosshairDynamic
+            || Mathf.Abs(GameSettings.RadarSize - snapshot.radarSize) > e
+            || Mathf.Abs(GameSettings.RadarZoom - snapshot.radarZoom) > e;
     }
 
     // ---------------- drawing ----------------
@@ -496,7 +535,7 @@ public class MainMenu : MonoBehaviour
         if (MenuButton(new Rect(bx, y, bw, smallH), "Выход", null, true, false, false)) Quit();
 
         string footer = "WASD — ходьба    Пробел — прыжок    C — присед    Shift — тихий шаг    R — перезарядка\n"
-            + "1–4, колесо, Q — оружие    ПКМ — прицел / режим огня    B — закупка    G / E — выбросить / поднять    TAB — счёт    Esc — пауза";
+            + "1–4, колесо, Q — оружие    ПКМ — прицел / режим огня    B — закупка    G / E — выбросить / поднять    TAB — счёт    Ё — консоль    Esc — пауза";
         if (mainFromPause) footer = "Esc — назад к паузе\n" + footer;
         GUI.Label(new Rect(16f, h - 110f * k, w - 32f, 96f * k), footer, footerStyle);
     }
@@ -632,8 +671,8 @@ public class MainMenu : MonoBehaviour
         return scene;
     }
 
-    // Two columns side by side ("Игра" with the crosshair preview under it, "Прицел"); on a narrow screen
-    // one column in a scroll view. Status line and the buttons stay under the rows.
+    // Two columns side by side (on the left "Игра", "Радар" and the crosshair preview, on the right "Прицел" and
+    // "Экран"); on a narrow or low screen one column in a scroll view. Status line and the buttons stay under the rows.
     void DrawSettings()
     {
         float pad = 36f * k;
@@ -641,25 +680,31 @@ public class MainMenu : MonoBehaviour
         float headH = Mathf.Round(44f * k);
         float bh = 64f * k;
         float colGap = 40f * k;
-        float previewH = 4f * rowH - headH;
+        float previewH = 3f * rowH;
+
+        float topH = (28f + 70f + 10f) * k;
+        float bottomH = (12f + 34f + 12f + 28f) * k + bh;
+        float sectionGap = 16f * k;
+        float maxContent = Mathf.Max(rowH, Screen.height - 32f - topH - bottomH);
+
+        // two columns: the taller of the left one and the right one
+        float leftH = headH * 3f + (GameRowCount + RadarRowCount) * rowH + previewH;
+        float rightH = headH * 2f + (CrosshairRowCount + ScreenRowCount) * rowH;
+        float twoH = Mathf.Max(leftH, rightH);
 
         float pw = Mathf.Min(1560f * k, Screen.width - 32f);
         float colW = (pw - pad * 2f - colGap) * 0.5f;
-        bool twoColumns = colW >= 560f * k;
+        bool twoColumns = colW >= 560f * k && twoH <= maxContent + 0.5f;
         if (!twoColumns)
         {
             pw = Mathf.Min(860f * k, Screen.width - 32f);
             pad = Mathf.Min(pad, pw * 0.04f);
         }
 
-        float topH = (28f + 70f + 10f) * k;
-        float bottomH = (12f + 34f + 12f + 28f) * k + bh;
-        float sectionGap = 16f * k;
-        // two columns: the taller of "Игра" + preview and "Прицел"; one column: everything under each other
+        // one column: everything under each other
         float contentH = twoColumns
-            ? Mathf.Max(headH * 2f + GameRowCount * rowH + previewH, headH + CrosshairRowCount * rowH)
-            : headH * 2f + (GameRowCount + CrosshairRowCount) * rowH + previewH + sectionGap * 2f;
-        float maxContent = Mathf.Max(rowH, Screen.height - 32f - topH - bottomH);
+            ? twoH
+            : headH * 4f + (GameRowCount + RadarRowCount + ScreenRowCount + CrosshairRowCount) * rowH + previewH + sectionGap * 4f;
         float viewH = Mathf.Min(contentH, maxContent);
 
         float ph = topH + viewH + bottomH;
@@ -679,11 +724,15 @@ public class MainMenu : MonoBehaviour
 
             float ly = SectionHeader(lx, y, colW, headH, "Игра");
             ly = GameRows(lx, ly, colW, ref changed);
+            ly = SectionHeader(lx, ly, colW, headH, "Радар");
+            ly = RadarRows(lx, ly, colW, ref changed);
             ly = SectionHeader(lx, ly, colW, headH, "Предпросмотр прицела");
             DrawPreview(new Rect(lx, ly, colW, previewH - 6f * k));
 
             float ry = SectionHeader(rx, y, colW, headH, "Прицел");
-            CrosshairRows(rx, ry, colW, ref changed);
+            ry = CrosshairRows(rx, ry, colW, ref changed);
+            ry = SectionHeader(rx, ry, colW, headH, "Экран");
+            ScreenRows(rx, ry, colW, ref changed);
         }
         else
         {
@@ -697,6 +746,12 @@ public class MainMenu : MonoBehaviour
             float cw = innerW - pad * 2f;
             float cy = SectionHeader(cx, 0f, cw, headH, "Игра");
             cy = GameRows(cx, cy, cw, ref changed);
+            cy += sectionGap;
+            cy = SectionHeader(cx, cy, cw, headH, "Радар");
+            cy = RadarRows(cx, cy, cw, ref changed);
+            cy += sectionGap;
+            cy = SectionHeader(cx, cy, cw, headH, "Экран");
+            cy = ScreenRows(cx, cy, cw, ref changed);
             cy += sectionGap;
             cy = SectionHeader(cx, cy, cw, headH, "Прицел");
             DrawPreview(new Rect(cx, cy, cw, previewH));
@@ -722,7 +777,12 @@ public class MainMenu : MonoBehaviour
         else if (Dirty())
         {
             statusStyle.normal.textColor = Accent;
-            GUI.Label(new Rect(p.x, y, pw, 34f * k), "Есть несохранённые изменения — «Назад» их отменит", statusStyle);
+            string status = "Есть несохранённые изменения — «Назад» их отменит";
+            if (ScreenDirty())
+                status = GameSettings.CanChangeDisplay
+                    ? "Экран сменится после «Сохранить», «Назад» отменит изменения"
+                    : "В редакторе экран не меняется (только в сборке)";
+            GUI.Label(new Rect(p.x, y, pw, 34f * k), status, statusStyle);
         }
         y += (34f + 12f) * k;
 
@@ -732,8 +792,10 @@ public class MainMenu : MonoBehaviour
 
         if (MenuButton(new Rect(bx, y, bw, bh), "Сохранить", null, true, true, true))
         {
+            // also puts the screen mode and resolution on the window (from the next frame on)
             GameSettings.Save();
             snapshot = Take();
+            screenSizes = GameSettings.ScreenSizes();
             savedUntil = Time.unscaledTime + 2f;
         }
         if (MenuButton(new Rect(bx + bw + gap, y, bw, bh), "По умолчанию", null, true, false, true))
@@ -752,8 +814,10 @@ public class MainMenu : MonoBehaviour
         return y + h;
     }
 
-    // sensitivity, sensitivity in the zoom, FOV, volume, radar (GameRowCount rows)
-    const int GameRowCount = 5;
+    // the number of rows in each group (the layout of DrawSettings counts on them)
+    const int GameRowCount = 4;        // sensitivity, sensitivity in the zoom, FOV, volume
+    const int RadarRowCount = 3;       // on/off, size, zoom
+    const int ScreenRowCount = 2;      // window mode, resolution
     const int CrosshairRowCount = 8;
 
     float GameRows(float x, float y, float w, ref bool changed)
@@ -784,12 +848,84 @@ public class MainMenu : MonoBehaviour
         if (volume != shownVolume) { GameSettings.MasterVolume = volume / 100f; changed = true; }
         y += rowH;
 
-        RowBack(y, 4);
+        return y;
+    }
+
+    // the radar: on/off, its size on the screen, its zoom (more = closer, a smaller part of the map)
+    float RadarRows(float x, float y, float w, ref bool changed)
+    {
+        SetColumn(x, w);
+
+        RowBack(y, 0);
         bool radar = ToggleRow(y, "Радар", GameSettings.ShowRadar, "Включён", "Выключен");
         if (radar != GameSettings.ShowRadar) { GameSettings.ShowRadar = radar; changed = true; }
         y += rowH;
 
+        RowBack(y, 1);
+        float size = SliderRow(y, "Размер радара", GameSettings.RadarSize,
+            GameSettings.MinRadarSize, GameSettings.MaxRadarSize, 0.1f, 0.05f, "{0:0.00}×");
+        if (size != GameSettings.RadarSize) { GameSettings.RadarSize = size; changed = true; }
+        y += rowH;
+
+        RowBack(y, 2);
+        float zoom = SliderRow(y, "Масштаб радара", GameSettings.RadarZoom,
+            GameSettings.MinRadarZoom, GameSettings.MaxRadarZoom, 0.1f, 0.05f, "{0:0.00}×");
+        if (zoom != GameSettings.RadarZoom) { GameSettings.RadarZoom = zoom; changed = true; }
+        y += rowH;
+
         return y;
+    }
+
+    // the window mode and the resolution (they go on the window when saved, GameSettings.ApplyDisplay)
+    float ScreenRows(float x, float y, float w, ref bool changed)
+    {
+        SetColumn(x, w);
+        if (screenSizes == null || screenSizes.Count == 0) screenSizes = GameSettings.ScreenSizes();
+
+        RowBack(y, 0);
+        int modes = GameSettings.DisplayModeNames.Length;
+        int step = CycleRow(y, "Режим экрана", GameSettings.DisplayModeName, false, Color.white);
+        if (step != 0)
+        {
+            GameSettings.ChooseDisplayMode((GameSettings.DisplayMode)(((int)GameSettings.Display + step + modes) % modes), screenSizes);
+            AddScreenSize(GameSettings.ChosenSize);
+            changed = true;
+        }
+        y += rowH;
+
+        RowBack(y, 1);
+        Vector2Int chosen = GameSettings.ChosenSize;
+        AddScreenSize(chosen);
+        int index = screenSizes.IndexOf(chosen);
+        step = CycleRow(y, "Разрешение", SizeText(chosen), false, Color.white);
+        if (step != 0 && screenSizes.Count > 0)
+        {
+            int n = screenSizes.Count;
+            Vector2Int next = screenSizes[((index < 0 ? 0 : index) + step + n) % n];
+            GameSettings.ScreenWidth = next.x;
+            GameSettings.ScreenHeight = next.y;
+            changed = true;
+        }
+        y += rowH;
+
+        return y;
+    }
+
+    // a size that is not in the list yet goes to its place (the list is sorted small to big)
+    void AddScreenSize(Vector2Int s)
+    {
+        if (s.x <= 0 || s.y <= 0 || screenSizes.Contains(s)) return;
+        int i = 0;
+        while (i < screenSizes.Count && (screenSizes[i].x < s.x || (screenSizes[i].x == s.x && screenSizes[i].y < s.y))) i++;
+        screenSizes.Insert(i, s);
+    }
+
+    // "1920 × 1080" and a dim "· сейчас" (the colour of DimText) when the window has this size now
+    static string SizeText(Vector2Int s)
+    {
+        string text = s.x + " × " + s.y;
+        if (s.x == Screen.width && s.y == Screen.height) text += "  <color=#ADB5BF>· сейчас</color>";
+        return text;
     }
 
     // style, colour, size, gap, thickness, length, outline, dynamic
@@ -988,7 +1124,11 @@ public class MainMenu : MonoBehaviour
             Fill(new Rect(tx, mid.center.y - sw * 0.5f, sw, sw), swatchColor);
             tx += sw + 12f * k;
         }
-        GUI.Label(new Rect(tx, mid.y, Mathf.Max(0f, mid.xMax - tx - 8f * k), mid.height), text, labelStyle);
+        // a long choice ("Полноэкранный в окне" in a narrow column) gets the smaller font
+        float textW = Mathf.Max(0f, mid.xMax - tx - 8f * k);
+        tempContent.text = text;
+        GUIStyle style = labelStyle.CalcSize(tempContent).x > textW ? labelSmallStyle : labelStyle;
+        GUI.Label(new Rect(tx, mid.y, textW, mid.height), text, style);
 
         if (GUI.Button(mid, GUIContent.none, GUIStyle.none)) step = 1;
         return step;

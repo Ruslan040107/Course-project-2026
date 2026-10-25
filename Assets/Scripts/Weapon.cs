@@ -112,8 +112,17 @@ public class Weapon : MonoBehaviour
     public int reserveAmmo = 90;
     public float reloadTime = 2.2f;
 
+    [Header("Player accuracy (like CS 2; set from data, see WeaponData)")]
+    [Tooltip("largest angle (degrees) of the first shot standing still / crouching")] public float standInaccuracy = 0.3f;
+    public float crouchInaccuracy = 0.22f;
+    [Tooltip("degrees added at full running speed")] public float moveInaccuracy = 5f;
+    [Tooltip("degrees added by every shot, they fall to 10% in recoveryTime")] public float inaccuracyPerShot = 0.4f;
+    public float recoveryTime = 0.4f;
+    public RecoilPattern recoilPattern = RecoilPattern.M4;
+    [Tooltip("how far up (degrees) the 10th bullet of a spray goes")] public float recoilScale = 3f;
+
     [Header("Other")]
-    public float botSpreadMultiplier = 2f;
+    [Tooltip("bots: x spreadAngle (their old accuracy model, see BotSpread)")] public float botSpreadMultiplier = 2f;
     public float moveSpeedFactor = 1f;
     [Tooltip("speed factor while firing (last shot less than FiringTime ago), 0 = moveSpeedFactor")]
     public float firingMoveSpeedFactor;
@@ -231,13 +240,13 @@ public class Weapon : MonoBehaviour
     // the player's speed factor: firingMoveSpeedFactor while firing (R8, G3SG1), otherwise moveSpeedFactor
     public float CurrentMoveSpeedFactor => firingMoveSpeedFactor > 0f && IsFiring ? firingMoveSpeedFactor : moveSpeedFactor;
 
-    // the largest angle (degrees) the next shot can go off the aim, for the crosshair;
-    // the burst spread and the pellet spread of shotguns are included
+    // the largest angle (degrees) the next shot can go off the aim, for the crosshair (the player: stance, movement and
+    // the shots just fired, see PlayerInaccuracy); the burst spread and the pellet spread of shotguns are included
     public float CurrentSpread
     {
         get
         {
-            float s = BaseSpread(out bool _);
+            float s = movement != null ? PlayerInaccuracy(out bool _) : BotSpread(out bool _);
             if (BurstMode && HasBurstMode) s *= burstSpreadMultiplier;
             if (AltFireHeld && HasAltFire) s *= altSpreadMultiplier;
             else if (fireDelay > 0f) s *= hammerSpreadMultiplier;
@@ -283,6 +292,13 @@ public class Weapon : MonoBehaviour
         rechargeTime = data.rechargeTime;
         spreadAngle = data.spreadAngle;
         recoilFactor = data.recoil;
+        standInaccuracy = data.standInaccuracy;
+        crouchInaccuracy = data.crouchInaccuracy;
+        moveInaccuracy = data.moveInaccuracy;
+        inaccuracyPerShot = data.inaccuracyPerShot;
+        recoveryTime = data.recoveryTime;
+        recoilPattern = data.recoilPattern;
+        recoilScale = data.recoilScale;
         magazineSize = data.magazineSize;
         reserveAmmo = data.reserveAmmo;
         reloadTime = data.reloadTime;
@@ -329,7 +345,16 @@ public class Weapon : MonoBehaviour
         lastShotTime = -10f;
         lastSlashTime = -10f;
         dualShots = 0;
+        ResetRecoil();
         CancelTrigger();
+    }
+
+    // the player's spray starts again: no recoil and no inaccuracy from earlier shots (a new weapon, a new round)
+    public void ResetRecoil()
+    {
+        bloomAtShot = 0f;
+        punchAtShot = Vector2.zero;
+        sprayAtShot = 0f;
     }
 
     public void ToggleBurstMode()
@@ -436,7 +461,14 @@ public class Weapon : MonoBehaviour
     public void StartReload()
     {
         FinishReload();
-        if (InfiniteAmmo || taser) return;
+        if (taser) return;
+        // infinite ammo (solo mode, console "ammo"): no reload, the magazine is simply full again
+        // (a gun that was empty when it was turned on would wait for a reload forever)
+        if (InfiniteAmmo)
+        {
+            if (!reloading && ammo < magazineSize) ammo = magazineSize;
+            return;
+        }
         if (IsDrawing) return;   // like shots and the scope: no reload while the weapon is being drawn
         if (reloading || ammo >= magazineSize || reserve <= 0) return;
 
@@ -537,15 +569,83 @@ public class Weapon : MonoBehaviour
         return true;
     }
 
-    // the largest angle (degrees) a shot can go off the aim: stance (or the bot's multipliers) and the scope.
-    // For a weapon with a scope (snipers, SG 553, AUG) spreadAngle is the scoped spread,
-    // without the scope it is x unscopedSpreadMultiplier (and at least unscopedMinSpread)
-    float BaseSpread(out bool noScope)
+    // ---------------- accuracy ----------------
+    // The player (like CS 2): the shot goes along the eye (PlayerController.AimRotation), moved by the aim punch of the
+    // recoil pattern, plus a random direction inside the inaccuracy cone: a random angle around the aim and a random part
+    // of the inaccuracy as the distance from it, so most shots land near the middle. Inaccuracy = stance (stand / crouch)
+    // + movement + the shots just fired (they go away during recoveryTime). The pattern is the same every spray:
+    // the first shot has no recoil, bullet N goes to point N of the pattern, the camera shows only part of it
+    // (PlayerController.viewPunchScale), and after a short pause the punch goes back and the spray starts again.
+    // Bots keep their old model (BotSpread): their accuracy did not change, so the simulations stay comparable.
+
+    float bloomAtShot;        // degrees added by the shots, as it was right after the last shot
+    Vector2 punchAtShot;      // aim punch right after the last shot (degrees: x up, y right)
+    float sprayAtShot;        // spray position right after the last shot (shots)
+
+    // the punch goes back like in CS 2: exponentially (1/s) plus linearly (degrees per second), so it really ends
+    const float PunchReturnExp = 6f;
+    const float PunchReturnLin = 6f;
+
+    // the punch stays this long after a shot: a bit longer than the time between two shots of a spray (at most 0.15 s),
+    // so a spray follows the pattern exactly
+    float PunchHold => Mathf.Min(1f / Mathf.Max(fireRate, 0.01f), 0.15f) + 0.04f;
+
+    // part of the last shot's punch left now: 1 during a spray, then down to 0
+    float PunchLeft
     {
-        float mult = movement != null ? movement.SpreadMultiplier : botSpreadMultiplier * ExternalSpreadMultiplier;
+        get
+        {
+            float idle = Time.time - lastShotTime - PunchHold;
+            if (idle <= 0f) return 1f;
+            float m0 = punchAtShot.magnitude;
+            if (m0 < 0.0001f) return 0f;
+            const float c = PunchReturnLin / PunchReturnExp;
+            float m = (m0 + c) * Mathf.Exp(-PunchReturnExp * idle) - c;
+            return Mathf.Clamp01(m / m0);
+        }
+    }
+
+    // the player's aim punch now (degrees: x up, y right): the next shot goes there, the camera shows part of it
+    public Vector2 AimPunch => punchAtShot * PunchLeft;
+
+    // the place of the next shot in the pattern (0 = the first shot of a spray, no recoil); goes back with the punch
+    float SprayPosition
+    {
+        get
+        {
+            float s = sprayAtShot * PunchLeft;
+            return s < 0.05f ? 0f : s;
+        }
+    }
+
+    // the inaccuracy (degrees) left from the shots fired before: it falls to 10% in recoveryTime
+    float ShotInaccuracy => bloomAtShot * Mathf.Pow(10f, -(Time.time - lastShotTime) / Mathf.Max(recoveryTime, 0.01f));
+
+    // the player: the largest angle (degrees) the next shot can go off the aim (before the burst / R8 multipliers).
+    // For a weapon with a scope (snipers, SG 553, AUG) stand/crouch are the scoped values,
+    // without the scope they are x unscopedSpreadMultiplier (and at least unscopedMinSpread)
+    float PlayerInaccuracy(out bool noScope)
+    {
         bool scope = data != null && data.HasScope;
         bool unscoped = scope && !Scoped;
         // the no-scope kill (killfeed icon) is only for rifles with a sniper scope
+        noScope = unscoped && HasSniperScope;
+
+        float stance = Mathf.Lerp(crouchInaccuracy, standInaccuracy, movement.StandFactor);
+        if (unscoped) stance = Mathf.Max(stance * data.unscopedSpreadMultiplier, data.unscopedMinSpread);
+
+        // MoveInaccuracy: 0 standing still, 1 running, 1.5 in the air
+        return stance + moveInaccuracy * movement.MoveInaccuracy + ShotInaccuracy;
+    }
+
+    // bots (unchanged): spreadAngle x botSpreadMultiplier x the bot's stance multiplier (crouch, hop) and the scope.
+    // For a weapon with a scope spreadAngle is the scoped spread, without the scope it is x unscopedSpreadMultiplier
+    // (and at least unscopedMinSpread). FireShot draws it in a square, as before.
+    float BotSpread(out bool noScope)
+    {
+        float mult = botSpreadMultiplier * ExternalSpreadMultiplier;
+        bool scope = data != null && data.HasScope;
+        bool unscoped = scope && !Scoped;
         noScope = unscoped && HasSniperScope;
         if (unscoped) mult *= data.unscopedSpreadMultiplier;
 
@@ -553,18 +653,88 @@ public class Weapon : MonoBehaviour
         if (unscoped) spreadNow = Mathf.Max(spreadNow, data.unscopedMinSpread);
 
         // scoped while moving: the scope does not help, the shot goes wide
-        if (scope && Scoped)
-        {
-            float mi = movement != null ? movement.MoveInaccuracy : ExternalMoveInaccuracy;
-            spreadNow = Mathf.Max(spreadNow, data.scopedMoveSpread * mi);
-        }
+        if (scope && Scoped) spreadNow = Mathf.Max(spreadNow, data.scopedMoveSpread * ExternalMoveInaccuracy);
 
         return spreadNow;
+    }
+
+    // ---------------- recoil patterns ----------------
+    // Point i = where bullet i + 1 of a spray goes (up, right), in parts of recoilScale (the 10th bullet goes 1 up).
+    // After the table the spray stays at the last height and swings between the last side offset and the opposite one.
+
+    // AK-47, Galil AR, SG 553: a strong climb, then left, right and left again
+    static readonly float[] AkUp = { 0f, 0.05f, 0.13f, 0.25f, 0.39f, 0.54f, 0.68f, 0.8f, 0.91f, 1f, 1.04f, 1.06f, 1.08f, 1.09f, 1.1f,
+        1.11f, 1.12f, 1.13f, 1.14f, 1.15f, 1.16f, 1.17f, 1.18f, 1.19f, 1.2f, 1.21f, 1.22f, 1.23f, 1.24f, 1.25f };
+    static readonly float[] AkRight = { 0f, 0f, 0.01f, 0.02f, 0.03f, 0.045f, 0.06f, 0.075f, 0.085f, 0.06f, -0.02f, -0.11f, -0.2f, -0.28f, -0.34f,
+        -0.38f, -0.36f, -0.27f, -0.15f, -0.04f, 0.07f, 0.17f, 0.25f, 0.29f, 0.27f, 0.19f, 0.09f, 0f, -0.08f, -0.13f };
+    // M4A4, M4A1-S, FAMAS, AUG: the same climb, then a small sway right and left
+    static readonly float[] M4Up = { 0f, 0.05f, 0.13f, 0.25f, 0.39f, 0.54f, 0.68f, 0.8f, 0.91f, 1f, 1.03f, 1.05f, 1.06f, 1.07f, 1.08f,
+        1.09f, 1.1f, 1.105f, 1.11f, 1.115f, 1.12f, 1.125f, 1.13f, 1.135f, 1.14f, 1.145f, 1.15f, 1.155f, 1.16f, 1.165f };
+    static readonly float[] M4Right = { 0f, 0f, -0.01f, -0.01f, 0f, 0.02f, 0.04f, 0.07f, 0.1f, 0.13f, 0.16f, 0.18f, 0.18f, 0.15f, 0.1f,
+        0.04f, -0.03f, -0.09f, -0.14f, -0.17f, -0.18f, -0.16f, -0.11f, -0.05f, 0.01f, 0.07f, 0.11f, 0.13f, 0.12f, 0.09f };
+    // SMGs: a quicker, smaller climb and a small sway
+    static readonly float[] SmgUp = { 0f, 0.08f, 0.2f, 0.34f, 0.49f, 0.63f, 0.76f, 0.86f, 0.94f, 1f, 1.03f, 1.05f, 1.07f, 1.08f, 1.09f,
+        1.1f, 1.11f, 1.12f, 1.13f, 1.14f, 1.15f, 1.16f, 1.17f, 1.18f, 1.19f, 1.2f, 1.21f, 1.22f, 1.23f, 1.24f };
+    static readonly float[] SmgRight = { 0f, 0.01f, 0.02f, 0.01f, -0.01f, -0.03f, -0.04f, -0.03f, 0f, 0.04f, 0.08f, 0.11f, 0.12f, 0.1f, 0.06f,
+        0.01f, -0.05f, -0.1f, -0.13f, -0.13f, -0.1f, -0.05f, 0.01f, 0.07f, 0.11f, 0.12f, 0.1f, 0.05f, -0.01f, -0.06f };
+    // machine guns: a long climb and a wide sway
+    static readonly float[] MgUp = { 0f, 0.06f, 0.15f, 0.27f, 0.4f, 0.54f, 0.67f, 0.79f, 0.9f, 1f, 1.05f, 1.09f, 1.12f, 1.15f, 1.18f,
+        1.2f, 1.22f, 1.24f, 1.26f, 1.28f, 1.29f, 1.3f, 1.31f, 1.32f, 1.33f, 1.34f, 1.35f, 1.36f, 1.37f, 1.38f };
+    static readonly float[] MgRight = { 0f, 0.02f, 0.05f, 0.06f, 0.05f, 0.02f, -0.03f, -0.09f, -0.14f, -0.17f, -0.16f, -0.1f, -0.02f, 0.08f, 0.17f,
+        0.23f, 0.25f, 0.21f, 0.12f, 0.01f, -0.11f, -0.21f, -0.27f, -0.27f, -0.2f, -0.09f, 0.04f, 0.16f, 0.24f, 0.27f };
+    // pistols, shotguns and snipers: every shot kicks up (the first ones most), pistols wobble a little to the right
+    static readonly float[] KickUp = { 0f, 0.17f, 0.32f, 0.45f, 0.57f, 0.68f, 0.77f, 0.86f, 0.93f, 1f, 1.06f, 1.11f, 1.16f, 1.2f, 1.24f,
+        1.27f, 1.3f, 1.32f, 1.34f, 1.36f, 1.38f, 1.39f, 1.4f, 1.41f, 1.42f, 1.43f, 1.44f, 1.45f, 1.46f, 1.47f };
+    static readonly float[] PistolRight = { 0f, 0.03f, 0.01f, 0.04f, 0.02f, 0.05f, 0.03f, 0.06f, 0.04f, 0.07f, 0.05f, 0.08f, 0.06f, 0.09f, 0.07f,
+        0.1f, 0.08f, 0.11f, 0.09f, 0.12f, 0.1f, 0.13f, 0.11f, 0.14f, 0.12f, 0.15f, 0.13f, 0.16f, 0.14f, 0.17f };
+
+    // the point of the pattern at spray position s (between two bullets it is in between), x = up, y = right
+    public static Vector2 PatternPoint(RecoilPattern pattern, float s)
+    {
+        float[] up, right;
+        switch (pattern)
+        {
+            case RecoilPattern.AK: up = AkUp; right = AkRight; break;
+            case RecoilPattern.M4: up = M4Up; right = M4Right; break;
+            case RecoilPattern.SMG: up = SmgUp; right = SmgRight; break;
+            case RecoilPattern.MachineGun: up = MgUp; right = MgRight; break;
+            case RecoilPattern.Pistol: up = KickUp; right = PistolRight; break;
+            case RecoilPattern.Shotgun:
+            case RecoilPattern.Sniper: up = KickUp; right = null; break;
+            default: return Vector2.zero;
+        }
+        if (s <= 0f) return Vector2.zero;
+
+        int last = up.Length - 1;
+        if (s >= last)
+        {
+            // a long spray (machine guns, P90, Bizon, Galil): the last height, swinging sideways around the middle
+            // (from the last side offset to the opposite one and back every 16 shots)
+            float side = right != null ? right[last] * Mathf.Cos((s - last) * 2f * Mathf.PI / 16f) : 0f;
+            return new Vector2(up[last], side);
+        }
+
+        int i = (int)s;
+        float t = s - i;
+        return new Vector2(Mathf.Lerp(up[i], up[i + 1], t), right != null ? Mathf.Lerp(right[i], right[i + 1], t) : 0f);
     }
 
     // one trigger pull: a round leaves the magazine, then one bullet, the pellets of a shell or the taser charge fly
     void FireShot(float spreadFactor)
     {
+        // the player's inaccuracy, punch and spray position before this shot (they depend on the time of the last shot)
+        bool player = movement != null;
+        bool noScope = false;
+        float playerSpread = 0f, shotsBefore = 0f, spray = 0f;
+        Vector2 punch = Vector2.zero;
+        if (player)
+        {
+            playerSpread = PlayerInaccuracy(out noScope) * spreadFactor;
+            shotsBefore = ShotInaccuracy;
+            punch = AimPunch;
+            spray = SprayPosition;
+        }
+
         ammo--;
         if (InfiniteAmmo) ammo = magazineSize;
         lastShotTime = Time.time;
@@ -577,14 +747,32 @@ public class Weapon : MonoBehaviour
         Stealth st = GetComponentInParent<Stealth>();
         if (st != null) st.Reveal();
 
-        bool inAir = movement != null ? !movement.IsGrounded : ExternalInAir;
-        float spreadNow = BaseSpread(out bool noScope) * spreadFactor;
+        bool inAir = player ? !movement.IsGrounded : ExternalInAir;
 
-        Quaternion spread = Quaternion.Euler(
-            Random.Range(-spreadNow, spreadNow),
-            Random.Range(-spreadNow, spreadNow),
-            0f);
-        Quaternion aim = muzzle.rotation * spread;
+        Quaternion aim;
+        if (player)
+        {
+            // a random direction around the aim, a random part of the inaccuracy as the angle off it
+            float around = Random.Range(0f, 2f * Mathf.PI);
+            float off = Random.value * playerSpread;
+            Quaternion spread = Quaternion.Euler(Mathf.Sin(around) * off, Mathf.Cos(around) * off, 0f);
+            aim = movement.AimRotation * Quaternion.Euler(-punch.x, punch.y, 0f) * spread;
+
+            // this shot's recoil: more inaccuracy for the next shots, and the pattern goes on to the next bullet
+            bloomAtShot = shotsBefore + inaccuracyPerShot;
+            punchAtShot = punch + (PatternPoint(recoilPattern, spray + 1f) - PatternPoint(recoilPattern, spray)) * recoilScale;
+            sprayAtShot = spray + 1f;
+        }
+        else
+        {
+            // bots: the old square spread around the muzzle (the same random numbers as before)
+            float spreadNow = BotSpread(out noScope) * spreadFactor;
+            Quaternion spread = Quaternion.Euler(
+                Random.Range(-spreadNow, spreadNow),
+                Random.Range(-spreadNow, spreadNow),
+                0f);
+            aim = muzzle.rotation * spread;
+        }
 
         if (taser)
         {

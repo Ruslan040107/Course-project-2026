@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 using System.Collections;
+using System.Collections.Generic;
 
 // Rounds 5v5 (or the solo mode, or a background simulation).
 // Normal 5v5 games have the CS money (Economy): kill rewards, round win / loss money, a buy time at the round start,
@@ -15,9 +16,16 @@ using System.Collections;
 //   the round timer starts after it; the buy time (Economy.BuyTimeLength) starts with the freeze;
 // - halftime: after half of maxRounds (or halftimeAfterRound) everybody changes side once per match (T <-> CT):
 //   scores swap with the groups, money $800, loss streaks reset, default weapons of the new side, bots renamed;
-// - buy zones: one circle around each spawn (the farthest spawn point + buyZoneMargin), buying only inside it;
+// - buy zones: one rectangle along the world axes around each spawn (its points and the spots of a big team,
+//   buyZoneMargin wider on each side, at least minBuyZoneSize across), buying only inside it;
 // - frozen bots (main menu option, botsFrozen in the Inspector or -freezebots): bots stand still and never shoot;
 // - the number of players per team comes from the main menu (GameSettings.PendingBotsPerTeam) when it was chosen.
+// Spawn places: every player gets his own spot on the floor, at least SpawnSpacing from everybody placed in the same
+// round (both teams), never on top of anybody: the first players of a team stand on the spawn points, the players of a
+// team bigger than its spawn points stand behind and beside the points (on the NavMesh, on the same floor, reachable
+// from the point in a straight line, not inside a wall or a box). Simulations with no more players than spawn points
+// keep exactly the old places (the points themselves).
+// The developer console uses: Current, RestartMatch, EndRoundNow, KillTeam, SpawnBotsNear, SetBotsFrozen.
 public class RoundManager : MonoBehaviour
 {
     public static event System.Action RoundStarted;
@@ -40,7 +48,18 @@ public class RoundManager : MonoBehaviour
     {
         public int team;
         public Vector3 center;
+        // the zone is a rectangle along the world axes: size.x across X, size.y across Z (metres);
+        // radius = half of its diagonal, for code that only needs a rough circle
+        public Vector2 size;
         public float radius;
+
+        public bool Contains(Vector3 p)
+        {
+            Vector3 d = p - center;
+            if (size.x > 0f && size.y > 0f) return Mathf.Abs(d.x) <= size.x * 0.5f && Mathf.Abs(d.z) <= size.y * 0.5f;
+            d.y = 0f;
+            return d.sqrMagnitude <= radius * radius;
+        }
     }
     public static readonly System.Collections.Generic.List<BuyZone> BuyZones = new System.Collections.Generic.List<BuyZone>();
 
@@ -62,6 +81,16 @@ public class RoundManager : MonoBehaviour
 
     // the RoundManager of the loaded scene (null between scenes)
     static RoundManager current;
+
+    // the RoundManager of the loaded scene, null when the scene has none (for the developer console and the menus)
+    public static RoundManager Current
+    {
+        get
+        {
+            if (current == null) current = FindAnyObjectByType<RoundManager>();
+            return current;
+        }
+    }
 
     // players per team (the player included) set in the Inspector of the loaded scene, before the main menu
     // choice or -bots changed botsPerTeam; the main menu shows it as the default "N × N"
@@ -130,10 +159,10 @@ public class RoundManager : MonoBehaviour
     public bool halftimeSwitch = true;
     [Tooltip("the side switch comes after this many rounds; 0 = half of maxRounds (30 -> after 15)")]
     public int halftimeAfterRound;
-    [Tooltip("buy zone radius = the farthest spawn point from the spawn centre + this (metres)")]
-    public float buyZoneMargin = 5f;
-    [Tooltip("the smallest buy zone radius (metres)")]
-    public float minBuyZoneRadius = 6f;
+    [Tooltip("the buy zone (a rectangle) is this much wider than the spawn points on each side (metres)")]
+    public float buyZoneMargin = 4.5f;
+    [Tooltip("the smallest width and depth of a buy zone (metres)")]
+    public float minBuyZoneSize = 10f;
 
     [Header("Training")]
     [Tooltip("bots stand still and never shoot, but can be killed (also the main menu option and -freezebots); never in simulations")]
@@ -183,6 +212,9 @@ public class RoundManager : MonoBehaviour
 
     // the freeze time, the halftime, the buy zones: normal 5v5 games only
     bool NormalGame => !simulation && !Solo;
+
+    // a background simulation (bot vs bot, -sim): no menus, no console, no money
+    public bool IsSimulation => simulation;
 
     void Awake()
     {
@@ -529,6 +561,7 @@ public class RoundManager : MonoBehaviour
             // no rounds in solo mode, only respawn if the player dies (for example falls out of the map)
             if (player != null && player.IsDead)
             {
+                BeginPlacement();
                 Spawn(0, spawnRoot0);
                 RoundStarted?.Invoke();
             }
@@ -537,7 +570,7 @@ public class RoundManager : MonoBehaviour
 
         if (matchOver)
         {
-            if (!simulation && !MainMenu.IsOpen && Input.GetKeyDown(KeyCode.R)) ResetMatch();
+            if (!simulation && !MainMenu.IsOpen && !DevConsole.IsOpen && Input.GetKeyDown(KeyCode.R)) ResetMatch();
             return;
         }
 
@@ -579,39 +612,50 @@ public class RoundManager : MonoBehaviour
             for (int i = 0; i < count; i++)
             {
                 Transform point = root.GetChild(i % root.childCount);
-                GameObject bot = Instantiate(botPrefab, point.position + Vector3.up, point.rotation);
-                bot.name = (team == 0 ? "T_" : "CT_") + (i + 1);
-                bot.GetComponent<Health>().team = team;
-                Stealth st = bot.GetComponent<Stealth>();
-                if (st == null) st = bot.AddComponent<Stealth>();
-                st.level = team == 0 ? stealthLevel0 : stealthLevel1;
-                st.speedPenaltyPerLevel = speedPenalty;
-                st.radiusFactor = radiusFactor;
-                st.revealTime = revealTime;
-                BotController bc = bot.GetComponent<BotController>();
-                if (bc != null)
-                {
-                    bc.sneakChance = botSneakChance;
-                    bc.crouchChance = botCrouchChance;
-                    if (botCrouchChance <= 0f) bc.coverCrouchChance = 0f;
-                }
-
-                if (teamMaterials != null && team < teamMaterials.Length)
-                {
-                    Renderer[] own = bot.GetComponentsInChildren<Renderer>();
-                    foreach (Renderer r in own)
-                        r.sharedMaterial = teamMaterials[team];
-                    // only these renderers change colour at the halftime (not the character model added later)
-                    if (!simulation) teamRenderers[bot.GetComponent<Health>()] = own;
-                }
+                CreateBot(team, i + 1, point.position + Vector3.up, point.rotation);
             }
         }
     }
 
+    // a new bot of the team: the name T_n / CT_n, the stealth level of the team, the bot options of this match and the
+    // team colour of its capsule (the spawn or SpawnBotsNear puts it on its place and gives it the weapons)
+    GameObject CreateBot(int team, int number, Vector3 position, Quaternion rotation)
+    {
+        GameObject bot = Instantiate(botPrefab, position, rotation);
+        bot.name = (team == 0 ? "T_" : "CT_") + number;
+        bot.GetComponent<Health>().team = team;
+        Stealth st = bot.GetComponent<Stealth>();
+        if (st == null) st = bot.AddComponent<Stealth>();
+        st.level = team == 0 ? stealthLevel0 : stealthLevel1;
+        st.speedPenaltyPerLevel = speedPenalty;
+        st.radiusFactor = radiusFactor;
+        st.revealTime = revealTime;
+        BotController bc = bot.GetComponent<BotController>();
+        if (bc != null)
+        {
+            bc.sneakChance = botSneakChance;
+            bc.crouchChance = botCrouchChance;
+            if (botCrouchChance <= 0f) bc.coverCrouchChance = 0f;
+        }
+
+        if (teamMaterials != null && team < teamMaterials.Length)
+        {
+            Renderer[] own = bot.GetComponentsInChildren<Renderer>();
+            foreach (Renderer r in own)
+                r.sharedMaterial = teamMaterials[team];
+            // only these renderers change colour at the halftime (not the character model added later)
+            if (!simulation) teamRenderers[bot.GetComponent<Health>()] = own;
+        }
+        return bot;
+    }
+
     // ---------------- buy zones ----------------
 
-    // one zone around each spawn: the centre of its points, the farthest point + buyZoneMargin (at least minBuyZoneRadius).
-    // The zones stay with the side (team index): after the halftime everybody buys at his new spawn. None in solo / simulations.
+    // One rectangle along the world axes around each spawn: the box of its spawn points and of the spots used at the
+    // last round start (a team bigger than its points stands beside them), buyZoneMargin wider on each side, at least
+    // minBuyZoneSize across, moved inside the outer walls (MapBounds). Built again at every round start (after the
+    // spawn), so a bigger team (main menu, bots added by the console) gets a bigger zone. A zone keeps its side (team
+    // index = spawnRoot0 / spawnRoot1): after the halftime everybody buys at his new spawn. None in solo / simulations.
     void BuildBuyZones()
     {
         BuyZones.Clear();
@@ -624,21 +668,74 @@ public class RoundManager : MonoBehaviour
     {
         if (root == null || root.childCount == 0) return;
 
-        Vector3 centre = SpawnCentre(root);
-        float farthest = 0f;
-        for (int i = 0; i < root.childCount; i++)
+        // the box of the points and of the spots of this side
+        Vector3 min = root.GetChild(0).position;
+        Vector3 max = min;
+        for (int i = 1; i < root.childCount; i++)
         {
-            Vector3 d = root.GetChild(i).position - centre;
-            d.y = 0f;
-            farthest = Mathf.Max(farthest, d.magnitude);
+            min = Vector3.Min(min, root.GetChild(i).position);
+            max = Vector3.Max(max, root.GetChild(i).position);
+        }
+        foreach (Vector3 p in sideSpots[team])
+        {
+            min = Vector3.Min(min, p);
+            max = Vector3.Max(max, p);
         }
 
+        float margin = Mathf.Max(0f, buyZoneMargin);
+        float minSize = Mathf.Max(1f, minBuyZoneSize);
+        float x0 = min.x - margin, x1 = max.x + margin;
+        float z0 = min.z - margin, z1 = max.z + margin;
+        GrowTo(ref x0, ref x1, minSize);
+        GrowTo(ref z0, ref z1, minSize);
+
+        // not through the outer walls: MapBounds.halfSize is the middle of the 1 m thick walls around the map
+        MapBounds bounds = FindAnyObjectByType<MapBounds>();
+        if (bounds != null)
+        {
+            KeepInside(ref x0, ref x1, bounds.halfSizeX - 0.5f);
+            KeepInside(ref z0, ref z1, bounds.halfSizeZ - 0.5f);
+        }
+
+        Vector2 size = new Vector2(x1 - x0, z1 - z0);
         BuyZones.Add(new BuyZone
         {
             team = team,
-            center = centre,
-            radius = Mathf.Max(farthest + buyZoneMargin, minBuyZoneRadius)
+            center = new Vector3((x0 + x1) * 0.5f, SpawnCentre(root).y, (z0 + z1) * 0.5f),
+            size = size,
+            radius = size.magnitude * 0.5f
         });
+    }
+
+    // makes the range [lo, hi] at least this long, growing it on both sides
+    static void GrowTo(ref float lo, ref float hi, float length)
+    {
+        float extra = length - (hi - lo);
+        if (extra <= 0f) return;
+        lo -= extra * 0.5f;
+        hi += extra * 0.5f;
+    }
+
+    // moves the range [lo, hi] inside [-limit, limit] without making it shorter (cut only if it is longer than that)
+    static void KeepInside(ref float lo, ref float hi, float limit)
+    {
+        if (limit <= 0f) return;
+        if (hi - lo >= limit * 2f)
+        {
+            lo = Mathf.Max(lo, -limit);
+            hi = Mathf.Min(hi, limit);
+            return;
+        }
+        if (lo < -limit)
+        {
+            hi += -limit - lo;
+            lo = -limit;
+        }
+        if (hi > limit)
+        {
+            lo -= hi - limit;
+            hi = limit;
+        }
     }
 
     // ---------------- halftime ----------------
@@ -702,9 +799,12 @@ public class RoundManager : MonoBehaviour
             SwapTeams();
         }
 
+        BeginPlacement();
         Spawn(0, spawnRoot0);
         if (!Solo) Spawn(1, spawnRoot1);
         freshLoadouts = false;
+        // the zones cover the spots used now (a bigger team stands on more of them)
+        BuildBuyZones();
 
         // the sides changed: everybody is alive, active and at his new spawn, the listeners update now
         if (teamsChanged)
@@ -738,21 +838,26 @@ public class RoundManager : MonoBehaviour
 
     void Spawn(int team, Transform root)
     {
+        // simulations with no more players than spawn points stand exactly where they always did (on the points)
+        bool oldPlaces = simulation && Size(team) <= root.childCount;
         int i = 0;
         foreach (Health h in Health.All)
         {
             if (h.team != team) continue;
 
             Transform point = root.GetChild(i % root.childCount);
-            // more players than spawn points (a big team from the main menu): the next ones stand around the points
-            Vector3 position = simulation ? point.position : SpawnPosition(point, i / root.childCount, i);
+            // the first players of the team on the points, the others (a big team) on free spots beside them
+            Vector3 position = oldPlaces ? point.position : SpawnSpot(root, i);
             i++;
 
             // like CS: a survivor keeps his weapons and their ammo, a dead (or new) player gets the default ones
             bool keep = !freshLoadouts && !h.IsDead;
 
             h.Revive();
-            Place(h, point, position);
+            if (oldPlaces) PlaceAtPoint(h, point, position);
+            else Place(h, position, SpawnFacing(position, point.eulerAngles.y));
+            placed.Add(position);
+            if (team == 0 || team == 1) sideSpots[team].Add(position);
 
             // bots take the team level, the player keeps the level set on his own Bhop component
             bool isPlayer = h.GetComponent<PlayerController>() != null;
@@ -805,34 +910,17 @@ public class RoundManager : MonoBehaviour
         return sum / root.childCount;
     }
 
-    Quaternion SpawnFacing(Transform point)
+    // looking from this place at the map centre; fallbackYaw when the place is the centre itself
+    Quaternion SpawnFacing(Vector3 from, float fallbackYaw)
     {
-        Vector3 to = SpawnLookTarget() - point.position;
+        Vector3 to = SpawnLookTarget() - from;
         to.y = 0f;
-        if (to.sqrMagnitude < 0.25f) return Quaternion.Euler(0f, point.eulerAngles.y, 0f);
+        if (to.sqrMagnitude < 0.25f) return Quaternion.Euler(0f, fallbackYaw, 0f);
         return Quaternion.LookRotation(to.normalized, Vector3.up);
     }
 
-    // lap 0: the spawn point itself; later laps: a free spot on the NavMesh 1.2 m (2.4 m ...) around it,
-    // reachable from the point in a straight line (no wall between), else the point itself
-    static Vector3 SpawnPosition(Transform point, int lap, int index)
-    {
-        Vector3 p = point.position;
-        if (lap <= 0) return p;
-        if (!NavMesh.SamplePosition(p, out NavMeshHit from, 2f, NavMesh.AllAreas)) return p;
-
-        for (int k = 0; k < 8; k++)
-        {
-            float angle = index * 47f + k * 45f;
-            Vector3 q = p + Quaternion.Euler(0f, angle, 0f) * Vector3.forward * (1.2f * lap);
-            if (!NavMesh.SamplePosition(q, out NavMeshHit hit, 0.6f, NavMesh.AllAreas)) continue;
-            if (NavMesh.Raycast(from.position, hit.position, out NavMeshHit _, NavMesh.AllAreas)) continue;
-            return new Vector3(hit.position.x, p.y, hit.position.z);
-        }
-        return p;
-    }
-
-    void Place(Health h, Transform point, Vector3 position)
+    // the old placing of the simulations (exactly as before 2026-10-24): the agent is warped to the point itself
+    void PlaceAtPoint(Health h, Transform point, Vector3 position)
     {
         NavMeshAgent agent = h.GetComponent<NavMeshAgent>();
         CharacterController cc = h.GetComponent<CharacterController>();
@@ -852,11 +940,228 @@ public class RoundManager : MonoBehaviour
             h.transform.position = position + Vector3.up;
         }
 
-        h.transform.rotation = SpawnFacing(point);
+        h.transform.rotation = SpawnFacing(point.position, point.eulerAngles.y);
 
         // the player also looks straight ahead, not up or down as at the end of the last round
         PlayerController pc = h.GetComponent<PlayerController>();
         if (pc != null) pc.ResetLook();
+    }
+
+    // puts a player or a bot with his feet on this floor spot: a bot's NavMeshAgent is warped there (it stands on the
+    // NavMesh just above the floor), the player's CharacterController stands on the floor whatever his crouch height is
+    void Place(Health h, Vector3 floor, Quaternion facing)
+    {
+        NavMeshAgent agent = h.GetComponent<NavMeshAgent>();
+        CharacterController cc = h.GetComponent<CharacterController>();
+
+        if (agent != null)
+        {
+            // no NavMesh under the spot (should not happen): at least the body stands there
+            if (!agent.enabled || !agent.Warp(floor)) h.transform.position = floor + Vector3.up * agent.baseOffset;
+        }
+        else if (cc != null)
+        {
+            cc.enabled = false;
+            // the bottom of the capsule a little above the floor (centre.y follows the crouch, the bottom stays)
+            float bottom = cc.height * 0.5f - cc.center.y;
+            h.transform.position = floor + Vector3.up * (bottom + cc.skinWidth + 0.02f);
+            cc.enabled = true;
+        }
+        else
+        {
+            h.transform.position = floor + Vector3.up;
+        }
+
+        h.transform.rotation = facing;
+
+        // the player also looks straight ahead, not up or down as at the end of the last round
+        PlayerController pc = h.GetComponent<PlayerController>();
+        if (pc != null) pc.ResetLook();
+    }
+
+    // ---------------- spawn spots ----------------
+
+    // the smallest distance between two players placed at a round start (metres; a character is 1 m wide)
+    public const float SpawnSpacing = 1.3f;
+    // what must fit at a spot: a standing character (2 m tall, radius 0.5; a little thinner, so a spot next to a
+    // wall still counts - the NavMesh keeps 0.5 m from walls anyway), from a bit above the floor
+    const float SpotRadius = 0.45f;
+    const float SpotHeight = 2f;
+    const float SpotFloorGap = 0.2f;
+    // the search goes around its start in rings: the first one this far, then every RingStep up to LastRing
+    const float FirstRing = 1.8f;
+    const float RingStep = 0.75f;
+    const float LastRing = 9f;
+    // the first direction of a ring, then turning to both sides by 30 degrees
+    static readonly float[] RingAngles = { 0f, 30f, -30f, 60f, -60f, 90f, -90f, 120f, -120f, 150f, -150f, 180f };
+    // the level without the capsules (Ignore Raycast), bodies and the player's own model (LocalBody)
+    const int IgnoreRaycastLayer = 2;
+    const int LocalBodyLayer = 9;
+    const int WorldMask = Physics.DefaultRaycastLayers & ~(1 << IgnoreRaycastLayer) & ~(1 << LocalBodyLayer);
+    // the most bots SpawnBotsNear adds at once
+    const int MaxSpawnNear = 20;
+
+    // the floor spots taken in this round (both teams; SpawnBotsNear: everybody alive) and the spots of each side
+    // (team index) used at the last round start, for its buy zone
+    readonly List<Vector3> placed = new List<Vector3>();
+    readonly List<Vector3>[] sideSpots = { new List<Vector3>(), new List<Vector3>() };
+    readonly Collider[] overlapHits = new Collider[64];
+    readonly RaycastHit[] rayHits = new RaycastHit[64];
+
+    // a new round (or the solo respawn) places everybody again
+    void BeginPlacement()
+    {
+        placed.Clear();
+        sideSpots[0].Clear();
+        sideSpots[1].Clear();
+    }
+
+    // the floor spot of the index-th player of a team: his spawn point when it is free, else the nearest free spot
+    // around it, trying behind the point first (away from the map centre), then beside it.
+    // No Random: the same team on the same map always gets the same spots.
+    Vector3 SpawnSpot(Transform root, int index)
+    {
+        int n = root.childCount;
+        Transform point = root.GetChild(index % n);
+        Vector3 away = point.position - SpawnLookTarget();
+        away.y = 0f;
+        if (away.sqrMagnitude < 0.01f) away = -point.forward;
+
+        if (FindFreeSpot(point.position, point.position, away, out Vector3 spot)) return spot;
+        // a very crowded spawn: around the other points of the team
+        for (int k = 1; k < n; k++)
+        {
+            Transform other = root.GetChild((index + k) % n);
+            if (FindFreeSpot(other.position, other.position, away, out spot)) return spot;
+        }
+        // nothing free at all (never on the maps): the point itself, on the floor
+        return FloorOrSelf(point.position);
+    }
+
+    // a free floor spot near "centre", reachable in a straight line from "from" (no wall between): the centre itself,
+    // then rings of growing radius, each one starting in the direction dir
+    bool FindFreeSpot(Vector3 from, Vector3 centre, Vector3 dir, out Vector3 spot)
+    {
+        Vector3 fromFloor = FloorOrSelf(from);
+        // with a NavMesh the spot must be on it (bots walk on it) and walkable from "from" in a straight line
+        bool mesh = NavMesh.SamplePosition(fromFloor, out NavMeshHit fromHit, 2f, NavMesh.AllAreas);
+        Vector3 fromNav = mesh ? fromHit.position : fromFloor;
+
+        // the candidates are looked for at the height of the floor of "from"
+        Vector3 start = new Vector3(centre.x, fromFloor.y, centre.z);
+        dir.y = 0f;
+        dir = dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.forward;
+
+        if (TrySpot(start, fromFloor, mesh, fromNav, out spot)) return true;
+        for (float r = FirstRing; r <= LastRing + 0.01f; r += RingStep)
+        {
+            foreach (float angle in RingAngles)
+            {
+                Vector3 c = start + Quaternion.Euler(0f, angle, 0f) * dir * r;
+                if (TrySpot(c, fromFloor, mesh, fromNav, out spot)) return true;
+            }
+        }
+        spot = start;
+        return false;
+    }
+
+    // one candidate: near the NavMesh (if there is one) on the same floor, reachable from "from", the real floor under
+    // it, at least SpawnSpacing from every spot taken, and a standing character fits there (no wall, box or crate)
+    bool TrySpot(Vector3 c, Vector3 fromFloor, bool mesh, Vector3 fromNav, out Vector3 spot)
+    {
+        spot = c;
+        // cheap test first: the NavMesh moves the candidate by 0.7 m at most
+        if (TooClose(c, SpawnSpacing - 0.7f)) return false;
+
+        Vector3 ground = c;
+        if (mesh)
+        {
+            // the NavMesh near the wanted place and on the same floor (a box or a platform is too far up)
+            if (!NavMesh.SamplePosition(c, out NavMeshHit hit, 0.7f, NavMesh.AllAreas)) return false;
+            // a straight walk from "from": no wall between (and not the other side of a wall)
+            if (NavMesh.Raycast(fromNav, hit.position, out NavMeshHit _, NavMesh.AllAreas)) return false;
+            ground = hit.position;
+        }
+        else if (WorldBlocked(fromFloor, c))
+        {
+            return false;
+        }
+
+        // the real floor (the NavMesh floats a little above it), not far from the NavMesh height
+        if (!FloorBelow(ground + Vector3.up, 2f, out Vector3 floor)) return false;
+        if (Mathf.Abs(floor.y - ground.y) > 0.5f || Mathf.Abs(floor.y - fromFloor.y) > 0.7f) return false;
+
+        if (TooClose(floor, SpawnSpacing) || Blocked(floor)) return false;
+        spot = floor;
+        return true;
+    }
+
+    // closer than this (on the ground, height not counted) to a spot taken already
+    bool TooClose(Vector3 p, float distance)
+    {
+        float d2 = distance * distance;
+        foreach (Vector3 q in placed)
+        {
+            float dx = p.x - q.x, dz = p.z - q.z;
+            if (dx * dx + dz * dz < d2) return true;
+        }
+        return false;
+    }
+
+    // a standing character at this floor spot would be inside the level (a wall, a box, a crate, a low ceiling)
+    bool Blocked(Vector3 floor)
+    {
+        Vector3 bottom = floor + Vector3.up * (SpotRadius + SpotFloorGap);
+        Vector3 top = floor + Vector3.up * (SpotHeight - SpotRadius);
+        int n = Physics.OverlapCapsuleNonAlloc(bottom, top, SpotRadius, overlapHits, WorldMask, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; i++)
+            if (!IsCharacter(overlapHits[i])) return true;
+        return false;
+    }
+
+    // something of the level between the two floor points, at the height of the waist (no NavMesh to check it)
+    bool WorldBlocked(Vector3 a, Vector3 b)
+    {
+        Vector3 from = a + Vector3.up;
+        Vector3 to = b + Vector3.up;
+        Vector3 d = to - from;
+        float length = d.magnitude;
+        if (length < 0.01f) return false;
+        int n = Physics.RaycastNonAlloc(from, d / length, rayHits, length, WorldMask, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; i++)
+            if (!IsCharacter(rayHits[i].collider)) return true;
+        return false;
+    }
+
+    // the nearest floor under this point (players and bots do not count), up to distance below it
+    bool FloorBelow(Vector3 origin, float distance, out Vector3 floor)
+    {
+        floor = origin;
+        bool found = false;
+        float best = float.MaxValue;
+        int n = Physics.RaycastNonAlloc(origin, Vector3.down, rayHits, distance, WorldMask, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; i++)
+        {
+            if (IsCharacter(rayHits[i].collider) || rayHits[i].distance >= best) continue;
+            best = rayHits[i].distance;
+            floor = rayHits[i].point;
+            found = true;
+        }
+        return found;
+    }
+
+    // the floor under a place (a spawn point hangs 1 m above it, a character's centre too); the place without a floor
+    Vector3 FloorOrSelf(Vector3 p)
+    {
+        return FloorBelow(p + Vector3.up * 0.5f, 3.5f, out Vector3 floor) ? floor : p;
+    }
+
+    // a capsule or a hitbox of a player or a bot: not an obstacle for a spot (everybody is placed again anyway).
+    // The training target never moves, so it is one.
+    static bool IsCharacter(Collider c)
+    {
+        Health h = c.GetComponentInParent<Health>();
+        return h != null && h.GetComponent<TrainingTarget>() == null;
     }
 
     int Alive(int team)
@@ -878,7 +1183,12 @@ public class RoundManager : MonoBehaviour
         int winner = -1;
         if (alive0 > 0 && alive1 == 0) winner = 0;
         else if (alive1 > 0 && alive0 == 0) winner = 1;
+        FinishRound(winner, alive0, alive1);
+    }
 
+    // the round is over with this winner (-1 = a draw): score, money, MVP, message, the CSV line of a simulation
+    void FinishRound(int winner, int alive0, int alive1)
+    {
         if (winner >= 0) score[winner]++;
         roundsPlayed++;
 
@@ -968,6 +1278,9 @@ public class RoundManager : MonoBehaviour
 
     void ResetMatch()
     {
+        // the bots added by the console played only in the last match
+        RetireAddedBots();
+
         // a new match starts on the first sides again (the next spawn raises Halftime for the listeners)
         if (sidesSwapped) SwapTeams();
         halftimeDone = false;
@@ -987,6 +1300,159 @@ public class RoundManager : MonoBehaviour
         Scoreboard board = FindAnyObjectByType<Scoreboard>();
         if (board != null) board.ResetStats();
         StartRound();
+    }
+
+    // ---------------- for the developer console ----------------
+    // RoundManager.Current gives the instance. Nothing here works in simulations (the console never runs there).
+
+    // the bots added by SpawnBotsNear in this match
+    readonly List<Health> addedBots = new List<Health>();
+    readonly List<Health> victims = new List<Health>();
+
+    // A new match, like R after the end of a match: the first sides again, score 0:0, $800 and the default weapons for
+    // everybody, the bots added by the console leave. The solo mode only puts the player back on his spawn.
+    // False in simulations.
+    public bool RestartMatch()
+    {
+        if (simulation) return false;
+        if (Solo)
+        {
+            BeginPlacement();
+            Spawn(0, spawnRoot0);
+            RoundStarted?.Invoke();
+            return true;
+        }
+        ResetMatch();
+        return true;
+    }
+
+    // Ends the current round at once: winner 0 = T, 1 = CT, -1 = a draw. The score, the round money, the MVP and the
+    // halftime work like after a normal round end (the next round starts after the break).
+    // False when there is no running round (simulation, solo mode, the break between rounds, the match is over).
+    public bool EndRoundNow(int winner)
+    {
+        if (!NormalGame || inBreak || matchOver) return false;
+        if (winner < -1 || winner > 1) winner = -1;
+        InFreezeTime = false;
+        FreezeTimeLeft = 0f;
+        FinishRound(winner, Alive(0), Alive(1));
+        return true;
+    }
+
+    // Kills the living bots of a team (0 = T, 1 = CT, -1 = all bots), never the player or the training target.
+    // They die like falling out of the map (no killer, no kill money); in a normal game the round ends as usual when
+    // a team has nobody left (after the freeze time, if it is running). Returns how many died.
+    public int KillTeam(int team)
+    {
+        if (simulation) return 0;
+        victims.Clear();
+        foreach (Health h in Health.All)
+        {
+            if (h == null || h.IsDead || !h.gameObject.activeInHierarchy || h.invulnerable) continue;
+            if (h.GetComponent<BotController>() == null) continue;
+            if (team >= 0 && h.team != team) continue;
+            victims.Add(h);
+        }
+
+        int killed = 0;
+        foreach (Health h in victims)
+        {
+            if (h == null || h.IsDead) continue;
+            h.TakeDamage(h.maxHealth * 10f);
+            h.ApplyPending();
+            if (h.IsDead) killed++;
+        }
+        victims.Clear();
+        return killed;
+    }
+
+    // Adds count bots of a team (0 = T, 1 = CT) on free floor spots in front of position (forward = the view
+    // direction; a few metres ahead, at least SpawnSpacing from everybody alive, not behind a wall). They are made like
+    // the bots of the match start (name T_n / CT_n, stealth, bhop, team colour, BotBuyer with the default pistol; they
+    // buy if the buy time runs), look back at position and play in their team until the end of the match (every round
+    // they spawn with the team; a new match removes them). Returns how many were added (0 in simulations, without a
+    // bot prefab, for a wrong team or when there is no free place).
+    public int SpawnBotsNear(int team, int count, Vector3 position, Vector3 forward)
+    {
+        if (simulation || botPrefab == null || team < 0 || team > 1 || count <= 0) return 0;
+        count = Mathf.Min(count, MaxSpawnNear);
+
+        forward.y = 0f;
+        forward = forward.sqrMagnitude > 0.0001f ? forward.normalized : Vector3.forward;
+        Vector3 side = Vector3.Cross(Vector3.up, forward);
+        Quaternion facing = Quaternion.LookRotation(-forward, Vector3.up);
+        Vector3 centre = position + forward * 3f;
+
+        // everybody alive keeps his place: the new bots stand beside them, not inside
+        placed.Clear();
+        foreach (Health h in Health.All)
+            if (h != null && !h.IsDead && h.gameObject.activeInHierarchy) placed.Add(h.transform.position);
+
+        int added = 0;
+        for (int k = 0; k < count; k++)
+        {
+            if (!FindFreeSpot(position, centre, side, out Vector3 spot)) break;
+
+            GameObject bot = CreateBot(team, BotsInTeam(team) + 1, spot + Vector3.up, facing);
+            Health h = bot.GetComponent<Health>();
+            Place(h, spot, facing);
+            placed.Add(spot);
+            addedBots.Add(h);
+
+            Bhop bh = bot.GetComponent<Bhop>();
+            if (bh == null) bh = bot.AddComponent<Bhop>();
+            bh.level = team == 0 ? bhopLevel0 : bhopLevel1;
+            bh.ResetBonus();
+
+            BotBuyer buyer = bot.GetComponent<BotBuyer>();
+            if (buyer == null) buyer = bot.AddComponent<BotBuyer>();
+            buyer.NewRound(false);
+            if (Economy.Enabled && Economy.InBuyTime) buyer.Buy();
+            buyer.EquipBest();
+
+            // the character model at once (the bots of the match start get it at the round start)
+            if (CharacterBody.VisualsAllowed() && bot.GetComponent<CharacterBody>() == null) bot.AddComponent<CharacterBody>();
+            added++;
+        }
+        return added;
+    }
+
+    // true: the bots stand still and never shoot (they can be killed); false: they play again, and the main menu
+    // option and -freezebots are off for this match too
+    public void SetBotsFrozen(bool frozen)
+    {
+        if (simulation) return;
+        botsFrozen = frozen;
+        if (!frozen)
+        {
+            freezeBotsArg = false;
+            GameSettings.BotsFrozen = false;
+        }
+        BotsFrozen = GameSettings.BotsFrozen || botsFrozen || freezeBotsArg;
+    }
+
+    // the bots of this team now (the player does not count)
+    int BotsInTeam(int team)
+    {
+        int count = 0;
+        foreach (Health h in Health.All)
+            if (h != null && h.team == team && h.GetComponent<BotController>() != null) count++;
+        return count;
+    }
+
+    // a new match: the bots added by the console leave. They are taken off the player list and hidden, like a dead bot
+    // that never comes back - not destroyed, because other scripts keep players in their tables.
+    void RetireAddedBots()
+    {
+        foreach (Health h in addedBots)
+        {
+            if (h == null) continue;
+            h.Unregister();
+            teamRenderers.Remove(h);
+            mvps.Remove(h);
+            h.gameObject.SetActive(false);
+        }
+        addedBots.Clear();
     }
 
     // GameHud draws the score, the timer and the round messages itself and sets this

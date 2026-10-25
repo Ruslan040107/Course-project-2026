@@ -218,7 +218,8 @@ public class TrainingTarget : MonoBehaviour
 
     void Update()
     {
-        if (Input.GetKeyDown(resetKey)) ResetStats();
+        // not while the letter is typed into the developer console
+        if (Input.GetKeyDown(resetKey) && !DevConsole.IsOpen) ResetStats();
 
         window.RemoveAll(h => Time.time - h.time > dpsWindow);
         popups.RemoveAll(p => Time.time - p.born > popupTime);

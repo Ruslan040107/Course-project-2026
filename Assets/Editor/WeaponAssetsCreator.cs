@@ -23,7 +23,8 @@ public static class WeaponAssetsCreator
         // Columns as in the table: name, category, team, price $, kill reward $, damage, recoil %, rpm,
         // effective range m, armour penetration %, reload s, magazine, reserve, speed (CS units, 250 = full speed),
         // damage without armour: head, chest/arms, stomach, legs.
-        // Then our own values: draw time s, spread degrees, penetration power (see Penetrable).
+        // Then our own values: draw time s, spread degrees (bots only; the player's accuracy is the Aim table below),
+        // penetration power (see Penetrable).
 
         // pistols
         WeaponData glock = Make("Glock-18",      WeaponCategory.Pistol, T,    200, 300, 30, 84, 400, 20, 47,     2.2f, 20, 120, 240, 118, 29, 37, 22,  0.5f, 1.0f,  0.8f);
@@ -124,6 +125,51 @@ public static class WeaponAssetsCreator
         zeus.rechargeTime = 30f;
         zeus.range = 2f;
 
+        // The player's accuracy and recoil, like CS 2 (bots keep 'spread' from the rows above, see Weapon.BotSpread).
+        // stand / crouch: the largest angle (degrees) of the first shot standing still / crouched, most shots land much
+        // closer (CS 'accurate range' ~ 0.15 m / tan(stand): AK-47 30 m, M4A4 37 m, USP-S 33 m, MP9 13 m), for scoped
+        // weapons the scoped value (x unscopedSpreadMultiplier without the scope); move: degrees at full run;
+        // per shot: degrees every shot adds; recovery: s until that falls to 10%; pattern: the spray shape;
+        // climb: degrees up of the 10th bullet = family size (AK 5, M4 4.2, SMG 3, MG 4, pistol / shotgun / sniper 6)
+        // x the table's recoil multiplier
+        //       name             stand   crouch  move  per shot recovery pattern                    climb
+        Aim("Glock-18",           0.42f,  0.32f,  2.5f, 1.0f,  0.30f, RecoilPattern.Pistol,     3.94f);
+        Aim("USP-S",              0.26f,  0.20f,  2.5f, 1.2f,  0.33f, RecoilPattern.Pistol,     5.38f);
+        Aim("P2000",              0.30f,  0.23f,  2.5f, 1.2f,  0.33f, RecoilPattern.Pistol,     4.99f);
+        Aim("P250",               0.48f,  0.37f,  2.8f, 1.5f,  0.35f, RecoilPattern.Pistol,     5.38f);
+        Aim("Dual Berettas",      0.55f,  0.42f,  3.0f, 1.0f,  0.30f, RecoilPattern.Pistol,     5.38f);
+        Aim("CZ75-Auto",          0.55f,  0.42f,  3.0f, 0.8f,  0.30f, RecoilPattern.Pistol,     5.76f);
+        Aim("Tec-9",              0.50f,  0.38f,  2.5f, 1.2f,  0.30f, RecoilPattern.Pistol,     5.76f);
+        Aim("Five-SeveN",         0.40f,  0.31f,  2.5f, 1.2f,  0.30f, RecoilPattern.Pistol,     5.76f);
+        Aim("R8 Revolver",        0.60f,  0.46f,  3.5f, 2.5f,  0.60f, RecoilPattern.Pistol,     11.62f);   // hammer shot x0.5
+        Aim("Desert Eagle",       0.30f,  0.23f,  4.0f, 2.5f,  0.55f, RecoilPattern.Pistol,     10.85f);
+        Aim("MAC-10",             0.80f,  0.61f,  2.5f, 0.35f, 0.30f, RecoilPattern.SMG,        2.16f);
+        Aim("UMP-45",             0.66f,  0.50f,  2.5f, 0.4f,  0.33f, RecoilPattern.SMG,        2.35f);
+        Aim("MP9",                0.65f,  0.50f,  2.0f, 0.35f, 0.28f, RecoilPattern.SMG,        2.16f);
+        Aim("PP-Bizon",           0.75f,  0.57f,  2.2f, 0.3f,  0.30f, RecoilPattern.SMG,        2.16f);
+        Aim("MP7",                0.52f,  0.40f,  2.2f, 0.35f, 0.30f, RecoilPattern.SMG,        1.97f);
+        Aim("MP5-SD",             0.50f,  0.38f,  2.2f, 0.33f, 0.30f, RecoilPattern.SMG,        1.92f);
+        Aim("P90",                0.70f,  0.53f,  2.2f, 0.3f,  0.30f, RecoilPattern.SMG,        3.07f);
+        Aim("Nova",               0.50f,  0.38f,  2.0f, 1.5f,  0.40f, RecoilPattern.Shotgun,    11.62f);   // the pellets spread around it
+        Aim("Sawed-Off",          0.60f,  0.46f,  2.0f, 1.5f,  0.40f, RecoilPattern.Shotgun,    11.71f);
+        Aim("MAG-7",              0.50f,  0.38f,  2.0f, 1.5f,  0.40f, RecoilPattern.Shotgun,    11.62f);
+        Aim("XM1014",             0.60f,  0.46f,  2.0f, 1.0f,  0.35f, RecoilPattern.Shotgun,    11.62f);
+        Aim("Negev",              0.95f,  0.72f,  7.0f, 0.25f, 0.50f, RecoilPattern.MachineGun, 3.14f);
+        Aim("M249",               0.85f,  0.65f,  7.0f, 0.25f, 0.50f, RecoilPattern.MachineGun, 3.33f);
+        Aim("Galil AR",           0.36f,  0.27f,  5.5f, 0.5f,  0.40f, RecoilPattern.AK,         3.92f);
+        Aim("FAMAS",              0.36f,  0.27f,  5.5f, 0.45f, 0.40f, RecoilPattern.M4,         3.02f);
+        Aim("AK-47",              0.29f,  0.22f,  6.0f, 0.45f, 0.43f, RecoilPattern.AK,         4.48f);
+        Aim("M4A1-S",             0.21f,  0.16f,  5.0f, 0.4f,  0.42f, RecoilPattern.M4,         3.49f);
+        Aim("M4A4",               0.23f,  0.175f, 5.0f, 0.4f,  0.42f, RecoilPattern.M4,         3.29f);
+        Aim("SG 553",             0.18f,  0.14f,  6.0f, 0.45f, 0.45f, RecoilPattern.AK,         4.48f);    // scoped; x1.6 without
+        Aim("AUG",                0.15f,  0.115f, 5.5f, 0.4f,  0.42f, RecoilPattern.M4,         3.49f);    // scoped; x1.6 without
+        Aim("SSG 08",             0.075f, 0.056f, 3.5f, 1.0f,  0.35f, RecoilPattern.Sniper,     7.58f);    // scoped; x16 without
+        Aim("AWP",                0.06f,  0.045f, 8.0f, 1.5f,  0.35f, RecoilPattern.Sniper,     11.71f);   // scoped; x40 without
+        Aim("SCAR-20",            0.06f,  0.045f, 6.0f, 0.6f,  0.35f, RecoilPattern.Sniper,     5.76f);    // scoped; x30 without
+        Aim("G3SG1",              0.06f,  0.045f, 6.0f, 0.6f,  0.35f, RecoilPattern.Sniper,     5.76f);
+        Aim("Knife",              0f,     0f,     0f,   0f,    0.30f, RecoilPattern.None,       0f);
+        Aim("Zeus x27",           0.30f,  0.30f,  1.0f, 0f,    0.30f, RecoilPattern.None,       0f);
+
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         Debug.Log(count + " weapon assets are in " + Folder);
@@ -160,7 +206,7 @@ public static class WeaponAssetsCreator
         w.stomachMultiplier = stomach / damage;
         w.legMultiplier = legs / damage;
         w.armorPenetration = armorPercent / 100f;
-        w.range = category == WeaponCategory.Sniper ? 200f : 100f;
+        w.range = category == WeaponCategory.Sniper ? 300f : 250f;   // a bullet flies far, like CS (the desert diagonal is ~102 m)
         w.effectiveRange = effectiveRange;
 
         w.fireRate = rpm / 60f;
@@ -214,6 +260,27 @@ public static class WeaponAssetsCreator
         EditorUtility.SetDirty(w);
         count++;
         return w;
+    }
+
+    // the player's accuracy and recoil pattern of a weapon made by Make above
+    static void Aim(string name, float stand, float crouch, float move, float perShot, float recovery,
+                    RecoilPattern pattern, float climb)
+    {
+        WeaponData w = AssetDatabase.LoadAssetAtPath<WeaponData>(Folder + "/" + name + ".asset");
+        if (w == null)
+        {
+            Debug.LogWarning("Create Weapon Assets: no asset for " + name);
+            return;
+        }
+
+        w.standInaccuracy = stand;
+        w.crouchInaccuracy = crouch;
+        w.moveInaccuracy = move;
+        w.inaccuracyPerShot = perShot;
+        w.recoveryTime = recovery;
+        w.recoilPattern = pattern;
+        w.recoilScale = climb;
+        EditorUtility.SetDirty(w);
     }
 
     // right click switches to bursts of 'shots' at 'rpm' inside a burst

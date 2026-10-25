@@ -6,7 +6,8 @@ using UnityEngine;
 // - a kill: the killer weapon's killReward (knife $1500, SMG $600, AWP $100 ...), a teammate killed: -$300;
 // - round win $3250, round loss $1400 + $500 for every loss in a row before it (at most $3400); a draw is a loss for both teams;
 // - buying: the first BuyTimeLength seconds of a round, counted from the start of the freeze time (BuyMenu, BotBuyer),
-//   and only inside the buy zone of the own side (RoundManager.BuyZones: a circle around each spawn; normal games only).
+//   and only inside the buy zone of the own side (RoundManager.BuyZones: a rectangle along the world axes around each
+//   spawn, rebuilt at every round start; normal games only). The developer console's BuyAnywhere lifts both limits.
 // Off (Enabled = false) in simulations and in the solo mode, then nothing costs money.
 public static class Economy
 {
@@ -34,8 +35,11 @@ public static class Economy
     public const string DefaultPistolCT = "USP-S";
 
     public static bool Enabled;
-    // seconds of buying at the start of a round
-    public static float BuyTimeLength = 20f;
+    // developer console "buyanywhere 1": buy at any time and place (still costs money)
+    public static bool BuyAnywhere;
+    // seconds of buying at the start of a round (like CS: 20)
+    public const float DefaultBuyTimeLength = 20f;
+    public static float BuyTimeLength = DefaultBuyTimeLength;
     // when the buy time of the current round ends (Time.time)
     public static float BuyTimeEnd;
 
@@ -55,6 +59,8 @@ public static class Economy
         money.Clear();
         weapons = null;
         Enabled = false;
+        BuyAnywhere = false;
+        BuyTimeLength = DefaultBuyTimeLength;
         BuyTimeEnd = 0f;
         MoneyChanged = null;
     }
@@ -141,7 +147,8 @@ public static class Economy
         return null;
     }
 
-    // inside one of the buy zones of his team (true when there are no zones, e.g. the solo mode)
+    // inside one of the buy zones of his team (the rectangle around his side's spawn, BuyZone.Contains: the height
+    // does not count); true when there are no zones, e.g. the solo mode
     public static bool InBuyZone(Health h)
     {
         if (h == null) return false;
@@ -150,18 +157,17 @@ public static class Economy
         {
             if (z.team != h.team) continue;
             any = true;
-            Vector3 d = h.transform.position - z.center;
-            d.y = 0f;
-            if (d.sqrMagnitude <= z.radius * z.radius) return true;
+            if (z.Contains(h.transform.position)) return true;
         }
         return !any;
     }
 
-    // the player may buy now: always when the economy is off (solo), else alive, in the buy time and in his buy zone
+    // the player may buy now: always when the economy is off (solo) or the console allows buying anywhere (still for
+    // money), else alive, in the buy time and in his buy zone
     public static bool CanBuy(Health h)
     {
         if (h == null || h.IsDead) return false;
-        if (!Enabled) return true;
+        if (!Enabled || BuyAnywhere) return true;
         return InBuyTime && InBuyZone(h);
     }
 

@@ -23,28 +23,30 @@ public class PlayerController : MonoBehaviour
     public KeyCode sneakKey = KeyCode.LeftShift;
     public float sneakSpeedFactor = 0.5f;
 
-    [Header("Spread multipliers (1 = weapon spreadAngle)")]
-    public float crouchSpread = 0.4f;
-    public float sneakSpread = 0.6f;
-    public float standSpread = 0.8f;
-    public float runSpread = 1f;
-    public float airSpread = 2f;
-    public float spreadChangeSpeed = 6f;
-
     [Header("Camera bob")]
     public float bobFrequency = 9f;
     public float bobHeight = 0.04f;
     public float bobSide = 0.025f;
     public float bobSmoothing = 10f;
 
-    [Header("Recoil (degrees)")]
-    public float recoilUp = 0.6f;
-    public float recoilSide = 0.5f;
-    public float recoilRoll = 0.25f;
-    public float recoilMax = 14f;
-    public float recoilRecoveryDelay = 0.15f;
-    public float recoilReturnSpeed = 5f;
-    public float sprayResetTime = 0.35f;
+    // The accuracy (stance, movement, shots) and the recoil pattern are in Weapon (data from WeaponData).
+    // The bullets go along AimRotation + the weapon's aim punch; the camera shows only part of the punch (like CS 2),
+    // so the bullets of a spray land a little above the crosshair.
+    [Header("Recoil view")]
+    [Tooltip("part of the weapon's aim punch the camera shows (CS 2: about half); the bullets follow the whole punch")]
+    [Range(0f, 1f)] public float viewPunchScale = 0.5f;
+    [Tooltip("1/s: how fast the camera follows the punch (smooths the jumps of single shots)")]
+    public float viewPunchFollow = 25f;
+    [Tooltip("a short extra kick of the camera on every shot, degrees x the weapon's recoil; it does not move the bullets")]
+    public float viewKick = 0.15f;
+    [Tooltip("1/s: how fast the extra kick goes back")]
+    public float viewKickReturn = 20f;
+
+    [Header("Noclip (developer console)")]
+    [Tooltip("metres per second of the noclip flight")]
+    public float noclipSpeed = 8f;
+    [Tooltip("x speed with Shift held")]
+    public float noclipFastFactor = 3f;
 
     CharacterController controller;
     Health health;
@@ -57,13 +59,29 @@ public class PlayerController : MonoBehaviour
     float bobTimer;
     float bobBlend;
     float moveAmount;
-    float spreadNow = 1f;
-    float kickPitch;
-    float kickYaw;
-    float kickRoll;
-    float lastShotTime = -10f;
     float moveInaccuracy;
-    int sprayIndex;
+    Vector2 viewPunch;   // the punch the camera shows now (degrees: x up, y right)
+    float kickNow;       // the extra kick of the last shots (degrees up)
+    bool noclip;
+    MapBounds bounds;
+    bool boundsSearched;
+
+    // developer console "noclip": the player flies along the view through walls (WASD, Space up, C / Ctrl down,
+    // Shift faster), no gravity; the CharacterController is off meanwhile, so nothing stops him. He stays inside MapBounds.
+    public bool Noclip
+    {
+        get => noclip;
+        set
+        {
+            if (noclip == value) return;
+            noclip = value;
+            verticalVelocity = 0f;
+            if (controller == null) controller = GetComponent<CharacterController>();
+            if (health == null) health = GetComponent<Health>();
+            // a dead player's capsule stays off (Revive / the round start turn it on)
+            if (controller != null) controller.enabled = !value && (health == null || !health.IsDead);
+        }
+    }
 
     // 0 = standing or creeping, 1 = running, above 1 = in the air
     public float MoveInaccuracy => moveInaccuracy;
@@ -77,10 +95,13 @@ public class PlayerController : MonoBehaviour
     // for the future sound system: true when the player makes no noise
     public bool IsSilent => controller != null && controller.isGrounded && (!IsMoving || IsSneaking || IsCrouching);
 
+    // 0 = crouched, 1 = standing (the weapon's inaccuracy goes from crouchInaccuracy to standInaccuracy with it)
     public float StandFactor => Mathf.InverseLerp(crouchHeight, standHeight, currentHeight);
 
-    // current spread multiplier, the weapon multiplies its spreadAngle by it
-    public float SpreadMultiplier => spreadNow;
+    // where the eyes look, without any recoil: the body's turn and the pitch of the mouse.
+    // The shots go along it plus the weapon's aim punch (Weapon.FireShot); the camera may show less of the punch and
+    // an extra kick, and Spectator moves the camera to another player after death, so it is not taken from the camera
+    public Quaternion AimRotation => transform.rotation * Quaternion.Euler(pitch, 0f, 0f);
 
     void Awake()
     {
@@ -119,26 +140,16 @@ public class PlayerController : MonoBehaviour
         // a shotgun shell kicks once: the other pellets of the shot are skipped
         if (health == null || shot.shooter != health || shot.melee || shot.pellet) return;
 
-        if (Time.time - lastShotTime > sprayResetTime) sprayIndex = 0;
-        lastShotTime = Time.time;
-
+        // only a short visual kick here: the spray itself is the weapon's aim punch (Weapon.AimPunch)
         float r = shot.recoil > 0f ? shot.recoil : 1f;
-
-        // the first shots kick up hard, later ones less, and the sideways kick follows a fixed wave: a learnable spray pattern
-        float up = recoilUp * r * Mathf.Lerp(1f, 0.5f, Mathf.Clamp01(sprayIndex / 15f));
-        float side = recoilSide * r * Mathf.Sin(sprayIndex * 0.8f);
-
-        kickPitch = Mathf.Min(kickPitch + up * Random.Range(0.9f, 1.1f), recoilMax);
-        kickYaw = Mathf.Clamp(kickYaw + side, -recoilMax * 0.5f, recoilMax * 0.5f);
-        kickRoll = Mathf.Clamp(kickRoll + Random.Range(-recoilRoll, recoilRoll) * r, -3f, 3f);
-        sprayIndex++;
+        kickNow = Mathf.Min(kickNow + viewKick * r, 1.5f);
     }
 
     void Update()
     {
         // Escape and the cursor belong to MainMenu (pause menu); without it Escape frees the cursor and a click takes it back
-        // (the buy menu keeps the cursor free while it is open)
-        if (!MainMenu.Active && !BuyMenu.IsOpen)
+        // (the buy menu and the developer console keep the cursor free while they are open)
+        if (!MainMenu.Active && !BuyMenu.IsOpen && !DevConsole.IsOpen)
         {
             if (Input.GetKeyDown(KeyCode.Escape))
             {
@@ -157,18 +168,57 @@ public class PlayerController : MonoBehaviour
 
         if (health != null && health.IsDead) return;
 
-        IsSneaking = Input.GetKey(sneakKey) && controller.isGrounded;
+        // the developer console is open: the keys and the mouse type into it, the player stands still (gravity goes on)
+        bool keys = !DevConsole.IsOpen;
 
-        UpdateCrouch();
-        Look();
-        Move();
+        IsSneaking = keys && !noclip && Input.GetKey(sneakKey) && controller.isGrounded;
+
+        // in noclip C means "down": no crouching then
+        UpdateCrouch(keys && !noclip);
+        Look(keys);
+        if (noclip) Fly(keys);
+        else Move(keys);
         UpdateMoveInaccuracy();
-        UpdateSpread();
     }
 
-    void UpdateCrouch()
+    // noclip: along the view, through walls, no gravity; not out of the map (MapBounds kills whoever stays outside)
+    void Fly(bool keys)
     {
-        float target = Input.GetKey(crouchKey) ? crouchHeight : standHeight;
+        // RoundManager turns the controller on again when it places the player at a round start
+        if (controller.enabled) controller.enabled = false;
+        verticalVelocity = 0f;
+        moveAmount = 0f;
+        if (!keys) return;
+
+        float x = Input.GetAxisRaw("Horizontal");
+        float z = Input.GetAxisRaw("Vertical");
+        float y = 0f;
+        if (Input.GetButton("Jump")) y += 1f;
+        if (Input.GetKey(crouchKey) || Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)) y -= 1f;
+
+        Transform view = cameraTransform != null ? cameraTransform : transform;
+        Vector3 dir = view.forward * z + view.right * x + Vector3.up * y;
+        if (dir.sqrMagnitude > 1f) dir.Normalize();
+        bool fast = Input.GetKey(sneakKey) || Input.GetKey(KeyCode.RightShift);
+        Vector3 p = transform.position + dir * (noclipSpeed * (fast ? noclipFastFactor : 1f) * Time.deltaTime);
+
+        if (!boundsSearched)
+        {
+            boundsSearched = true;
+            bounds = FindAnyObjectByType<MapBounds>();
+        }
+        if (bounds != null)
+        {
+            p.x = Mathf.Clamp(p.x, -bounds.halfSizeX + 0.5f, bounds.halfSizeX - 0.5f);
+            p.z = Mathf.Clamp(p.z, -bounds.halfSizeZ + 0.5f, bounds.halfSizeZ - 0.5f);
+            p.y = Mathf.Clamp(p.y, bounds.minY + 1f, bounds.maxY - 1f);
+        }
+        transform.position = p;
+    }
+
+    void UpdateCrouch(bool keys)
+    {
+        float target = keys && Input.GetKey(crouchKey) ? crouchHeight : standHeight;
         currentHeight = Mathf.MoveTowards(currentHeight, target, heightChangeSpeed * Time.deltaTime);
 
         controller.height = currentHeight;
@@ -212,29 +262,16 @@ public class PlayerController : MonoBehaviour
         moveInaccuracy = Mathf.MoveTowards(moveInaccuracy, target, 8f * Time.deltaTime);
     }
 
-    void UpdateSpread()
-    {
-        float target;
-
-        if (!controller.isGrounded) target = airSpread;
-        else if (IsCrouching) target = crouchSpread;
-        else if (IsSneaking) target = sneakSpread;
-        else if (!IsMoving) target = standSpread;
-        else target = runSpread;
-
-        spreadNow = Mathf.MoveTowards(spreadNow, target, spreadChangeSpeed * Time.deltaTime);
-    }
-
     // a new round: the view looks straight ahead again (RoundManager turns the body towards the map centre)
     public void ResetLook()
     {
         pitch = 0f;
-        kickPitch = 0f;
-        kickYaw = 0f;
-        kickRoll = 0f;
+        viewPunch = Vector2.zero;
+        kickNow = 0f;
+        if (weapon != null) weapon.ResetRecoil();
     }
 
-    void Look()
+    void Look(bool keys)
     {
         float sens = GameSettings.Sensitivity * (shoot != null ? shoot.SensitivityFactor : 1f);
         // the own sensitivity of the zoom (scopes and optics), on top of the scope's FOV factor
@@ -243,8 +280,8 @@ public class PlayerController : MonoBehaviour
         float my = Input.GetAxis("Mouse Y") * sens;
 
         // locking the cursor after a menu can give one big mouse jump;
-        // the mouse moves the cursor of the buy menu, not the view (like in CS)
-        if (BuyMenu.IsOpen || Time.frameCount - MainMenu.LastClosedFrame <= 1)
+        // the mouse moves the cursor of the buy menu (or the console is open), not the view (like in CS)
+        if (!keys || BuyMenu.IsOpen || Time.frameCount - MainMenu.LastClosedFrame <= 1)
         {
             mx = 0f;
             my = 0f;
@@ -253,22 +290,19 @@ public class PlayerController : MonoBehaviour
         transform.Rotate(0f, mx, 0f);
         pitch = Mathf.Clamp(pitch - my, -85f, 85f);
 
-        // while the weapon is firing the kick stays, it only recovers after the shooting stops
-        if (Time.time - lastShotTime > recoilRecoveryDelay)
-        {
-            float t = 1f - Mathf.Exp(-recoilReturnSpeed * Time.deltaTime);
-            kickPitch = Mathf.Lerp(kickPitch, 0f, t);
-            kickYaw = Mathf.Lerp(kickYaw, 0f, t);
-            kickRoll = Mathf.Lerp(kickRoll, 0f, t);
-        }
+        // the camera shows part of the weapon's aim punch (smoothly) and the short kick of the last shots
+        Vector2 target = weapon != null ? weapon.AimPunch * viewPunchScale : Vector2.zero;
+        float dt = Time.deltaTime;
+        viewPunch = Vector2.Lerp(viewPunch, target, 1f - Mathf.Exp(-viewPunchFollow * dt));
+        kickNow = Mathf.Lerp(kickNow, 0f, 1f - Mathf.Exp(-viewKickReturn * dt));
 
-        cameraTransform.localRotation = Quaternion.Euler(pitch - kickPitch, kickYaw, kickRoll);
+        cameraTransform.localRotation = Quaternion.Euler(pitch - viewPunch.x - kickNow, viewPunch.y, 0f);
     }
 
-    void Move()
+    void Move(bool keys)
     {
-        float x = Input.GetAxis("Horizontal");
-        float z = Input.GetAxis("Vertical");
+        float x = keys ? Input.GetAxis("Horizontal") : 0f;
+        float z = keys ? Input.GetAxis("Vertical") : 0f;
 
         // freeze time at the round start: no walking and no jumping, looking around and crouching still work
         bool frozen = RoundManager.InFreezeTime;
@@ -289,7 +323,7 @@ public class PlayerController : MonoBehaviour
             verticalVelocity = -2f;
 
         // with the bhop upgrade holding Jump keeps hopping, and every chained jump adds speed
-        bool jumpPressed = !frozen && (bhopOn ? Input.GetButton("Jump") : Input.GetButtonDown("Jump"));
+        bool jumpPressed = keys && !frozen && (bhopOn ? Input.GetButton("Jump") : Input.GetButtonDown("Jump"));
 
         if (controller.isGrounded && jumpPressed)
         {

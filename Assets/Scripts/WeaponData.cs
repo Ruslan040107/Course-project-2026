@@ -6,6 +6,9 @@ public enum WeaponCategory { Pistol, SMG, Rifle, Sniper, Melee, Shotgun, Machine
 // which hand slot a weapon goes to (like CS: 1 primary, 2 pistol, 3 knife / gear)
 public enum WeaponSlot { Primary, Secondary, Knife, Gear }
 
+// the shape of the spray (Weapon.PatternPoint has the points); new values are added at the END
+public enum RecoilPattern { None, AK, M4, SMG, Pistol, Shotgun, MachineGun, Sniper }
+
 [CreateAssetMenu(menuName = "Game/Weapon Data", fileName = "NewWeapon")]
 public class WeaponData : ScriptableObject
 {
@@ -62,10 +65,22 @@ public class WeaponData : ScriptableObject
     [Tooltip("seconds until the taser is charged again")] public float rechargeTime = 30f;
 
     [Header("Accuracy")]
-    [Tooltip("base spread in degrees, the player stance multiplies it")] public float spreadAngle = 1f;
-    [Tooltip("camera kick multiplier ('Отдача' in % is the opposite: more % = less kick)")] public float recoil = 1f;
+    [Tooltip("BOTS only: base spread in degrees, x the bot's multipliers (the bots' accuracy of the research, unchanged); " +
+             "the player uses the 'Player accuracy' values below")] public float spreadAngle = 1f;
+    [Tooltip("kick multiplier of the model and the camera ('Отдача' in % is the opposite: more % = less kick)")] public float recoil = 1f;
     [Tooltip("penetration power: how much 'strength x meters' of objects a bullet can go through (see Penetrable)")]
     public float penetration = 1.5f;
+
+    [Header("Player accuracy (like CS 2)")]
+    [Tooltip("the largest angle (degrees) the first shot goes off the crosshair when standing still; most shots land " +
+             "much closer to the middle. With a scope it is the scoped value")] public float standInaccuracy = 0.3f;
+    [Tooltip("the same when crouching")] public float crouchInaccuracy = 0.22f;
+    [Tooltip("degrees added at full running speed (part of it when walking, x1.5 in the air)")] public float moveInaccuracy = 5f;
+    [Tooltip("degrees added by every shot; they go away when the shooting stops")] public float inaccuracyPerShot = 0.4f;
+    [Tooltip("seconds for the inaccuracy of the shots to fall to 10%")] public float recoveryTime = 0.4f;
+    [Tooltip("the spray: every spray the bullets go the same way, shot by shot (the camera shows about half of it)")]
+    public RecoilPattern recoilPattern = RecoilPattern.M4;
+    [Tooltip("size of the pattern: how far up (degrees) the 10th bullet of a spray goes")] public float recoilScale = 3f;
 
     [Header("Ammo")]
     public int magazineSize = 30;

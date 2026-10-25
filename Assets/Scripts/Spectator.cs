@@ -67,8 +67,9 @@ public class Spectator : MonoBehaviour
         if (watchedBot != null) eyes -= watchedBot.crouchEyeDrop * watchedBot.CrouchAmount;
         cam.localPosition = new Vector3(0f, eyes, 0.2f);
 
-        // clicks on the pause menu buttons (and the click that takes the cursor back) do not switch the watched teammate
-        if (MainMenu.IsOpen || Time.timeScale <= 0f || Cursor.lockState != CursorLockMode.Locked) return;
+        // clicks on the pause menu buttons (and the click that takes the cursor back) do not switch the watched teammate,
+        // nor clicks while the developer console is open
+        if (MainMenu.IsOpen || Time.timeScale <= 0f || Cursor.lockState != CursorLockMode.Locked || DevConsole.IsOpen) return;
         if (Time.frameCount - MainMenu.LastClosedFrame <= 1) return;
 
         if (Input.GetMouseButtonDown(0)) Cycle(mates, 1);

@@ -46,6 +46,13 @@ MonoBehaviour:
   spreadAngle: 0.3
   recoil: 0.4
   penetration: 0
+  standInaccuracy: 0.3
+  crouchInaccuracy: 0.3
+  moveInaccuracy: 1
+  inaccuracyPerShot: 0
+  recoveryTime: 0.3
+  recoilPattern: 0
+  recoilScale: 0
   magazineSize: 1
   reserveAmmo: 0
   reloadTime: 0

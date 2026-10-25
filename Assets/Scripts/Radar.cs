@@ -6,21 +6,26 @@ using UnityEngine.SceneManagement;
 // CS-like radar (minimap) in the top left corner for the human player.
 // - Teammates: a light blue dot for every living teammate, it goes away only when he dies.
 // - Enemies: a red dot only while somebody of the player's team sees them (in his field of view, with a clear
-//   line of sight). When nobody sees an enemy any more, the dot stays where he was last seen and fades out
-//   in about a second. Spotting is computed the same way for both teams (IsSpotted), only the player's team
-//   radar is drawn.
+//   line of sight). When nobody sees an enemy any more, the dot turns into a red "?" where he was last seen.
+//   The "?" stays until he is seen again, dies or a new round starts, and fades out after about 15 seconds.
+//   Spotting is computed the same way for both teams (IsSpotted), only the player's team radar is drawn.
 // - The map under the dots is a top-down layout of the level (floor, raised places, walls, covered floor like
 //   tunnels), made once at the start from physics queries, so players and bodies never appear in it.
 // - The radar turns with the view (forward is up), the player is the white arrow in the centre.
 //   While the dead player watches a teammate, the radar is centred on that teammate.
-// - Buy zones (RoundManager.BuyZones, normal 5v5 games only): the player's team zone green, the enemy zone red,
-//   a see-through circle with an outline, drawn over the map and under the dots.
+// - Buy zones (RoundManager.BuyZones, normal games only): the player's team zone green, the enemy zone red,
+//   a see-through rectangle with an outline (BuyZone.size along the world X and Z), turned with the map,
+//   drawn over the map and under the dots and cut at the radar's edge.
+// - Settings: GameSettings.RadarSize scales the radar on the screen, GameSettings.RadarZoom brings the map closer
+//   (more zoom = fewer metres to the edge). Both are read every frame, so a change shows at once. The radar never
+//   grows under the score at the top centre or over the boxes at the bottom left.
 // It adds itself to every scene with a RoundManager and a player, never in simulations.
 public class Radar : MonoBehaviour
 {
     [Header("Look")]
-    [Tooltip("meters from the centre to the edge")] public float range = 30f;
-    [Tooltip("diameter in pixels at 1080p, scales with the screen height")] public float sizeAt1080 = 220f;
+    [Tooltip("meters from the centre to the edge at zoom 1 (GameSettings.RadarZoom divides it)")] public float range = 30f;
+    [Tooltip("diameter in pixels at 1080p and size 1 (GameSettings.RadarSize multiplies it), scales with the screen height")]
+    public float sizeAt1080 = 220f;
     [Tooltip("gap to the screen corner in pixels at 1080p")] public float margin = 16f;
     [Range(0f, 1f)] public float opacity = 0.85f;
     public Color allyColor = new Color(0.35f, 0.78f, 1f, 1f);
@@ -30,7 +35,9 @@ public class Radar : MonoBehaviour
 
     [Header("Spotting")]
     [Tooltip("seconds between the visibility checks")] public float checkInterval = 0.1f;
-    [Tooltip("seconds an enemy dot takes to fade out after nobody sees him")] public float fadeTime = 1f;
+    [Tooltip("seconds the red dot takes to turn into a question mark after nobody sees the enemy")] public float fadeTime = 0.3f;
+    [Tooltip("seconds the question mark stays where the enemy was last seen")] public float lastSeenTime = 15f;
+    [Tooltip("the question mark fades out during the last seconds")] public float lastSeenFade = 2f;
     [Tooltip("how far the human player spots enemies; the target's stealth makes it shorter, like for bots")]
     public float playerViewRange = 120f;
 
@@ -51,12 +58,16 @@ public class Radar : MonoBehaviour
 
     const byte Void = 0, Wall = 1, Floor = 2, Raised = 3;
 
-    // the buy zone texture: the circle takes this part of its width (the clear rest keeps the clamped edge and the
-    // mip levels see-through), the outline is this part of the radius, the inside this opaque
-    const float ZoneFill = 0.8f;
-    const float ZoneLine = 0.09f;
-    const float ZoneInside = 0.28f;
-    const int ZoneMips = 4;
+    // the buy zone: how opaque the inside is (the outline is solid)
+    const float ZoneInside = 0.25f;
+
+    // the HUD around the radar, in pixels at 1080p: the timer, the scores and the rows of players at the top centre
+    // (260) and the "СМЕНА СТОРОН" banner under them (560 wide) take this much to each side of the middle; the health,
+    // bhop and money boxes with the "+$300" lines take this much from the bottom at the left
+    const float TopHudHalfWidth = 280f;
+    const float BottomHudHeight = 300f;
+    // the training target's panel in solo mode is in the top left corner (20, 80, 440 x 198 pixels): go under it
+    const float TrainingPanelBottom = 282f;
 
     static readonly Color32 VoidColor = new Color32(14, 16, 19, 255);
     static readonly Color32 WallColor = new Color32(38, 41, 46, 255);
@@ -70,7 +81,7 @@ public class Radar : MonoBehaviour
     {
         public bool visible;
         public float lostAt;
-        public Vector3 lastPos;
+        public Vector3 lastPos;   // where the enemies of this player saw him last
     }
 
     static Radar instance;
@@ -99,8 +110,9 @@ public class Radar : MonoBehaviour
     float mapReadyAt;
     Material mapMaterial;
     RenderTexture view;              // the round map turned with the view, drawn every frame
-    Texture2D ringTexture, dotTexture, arrowTexture, zoneTexture;
+    Texture2D ringTexture, dotTexture, arrowTexture, zoneTexture, questionTexture;
     bool flipY;                     // drawing into a texture comes out upside down on this graphics API
+    readonly Vector2[] zoneCorners = new Vector2[4];
 
     readonly RaycastHit[] rayHits = new RaycastHit[16];
     readonly Collider[] overlaps = new Collider[16];
@@ -109,6 +121,8 @@ public class Radar : MonoBehaviour
 
     bool trainingPanel;
     float nextPanelCheck;
+    Scoreboard scoreboard;
+    float nextScoreboardSearch;
 
     // true while somebody of the other team sees this player (the radar of his enemies shows him)
     public static bool IsSpotted(Health h)
@@ -117,6 +131,13 @@ public class Radar : MonoBehaviour
     }
 
     // ---------------- bootstrap ----------------
+
+    // Play mode starts without a domain reload: no radar of the last run
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetStatics()
+    {
+        instance = null;
+    }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Boot()
@@ -206,6 +227,7 @@ public class Radar : MonoBehaviour
 
         dotTexture = MakeDot(64);
         arrowTexture = MakeArrow(64);
+        questionTexture = MakeQuestion(64);
 
         StartCoroutine(BuildMap());
     }
@@ -225,8 +247,10 @@ public class Radar : MonoBehaviour
         if (dotTexture != null) Destroy(dotTexture);
         if (arrowTexture != null) Destroy(arrowTexture);
         if (zoneTexture != null) Destroy(zoneTexture);
+        if (questionTexture != null) Destroy(questionTexture);
     }
 
+    // a new round: no dots and no question marks from the last one
     void OnRoundStarted()
     {
         spots.Clear();
@@ -248,6 +272,19 @@ public class Radar : MonoBehaviour
         return h != null && !h.IsDead && h.gameObject.activeInHierarchy;
     }
 
+    // the size and zoom settings, kept inside their ranges. They are read every frame, so a change in the settings
+    // screen (GameSettings.Changed) or from anywhere else shows at once.
+    static float SizeSetting => Setting(GameSettings.RadarSize, GameSettings.DefaultRadarSize, GameSettings.MinRadarSize, GameSettings.MaxRadarSize);
+    static float ZoomSetting => Setting(GameSettings.RadarZoom, GameSettings.DefaultRadarZoom, GameSettings.MinRadarZoom, GameSettings.MaxRadarZoom);
+
+    static float Setting(float value, float def, float min, float max)
+    {
+        return float.IsNaN(value) || float.IsInfinity(value) ? def : Mathf.Clamp(value, min, max);
+    }
+
+    // meters from the centre to the edge: more zoom = closer
+    float Range => Mathf.Max(range, 1f) / ZoomSetting;
+
     void LateUpdate()
     {
         if (playerHealth == null) return;
@@ -265,7 +302,7 @@ public class Radar : MonoBehaviour
         if (Time.time < nextCheck) return;
         nextCheck = Time.time + checkInterval;
 
-        // dead players leave the radar at once
+        // dead players leave the radar at once (their question marks too)
         gone.Clear();
         foreach (KeyValuePair<Health, Spot> pair in spots)
             if (!Alive(pair.Key)) gone.Add(pair.Key);
@@ -290,10 +327,9 @@ public class Radar : MonoBehaviour
             }
             else if (s.visible)
             {
-                // the dot stays here and fades out
+                // lost from sight: the last place he was seen at stays marked
                 s.visible = false;
                 s.lostAt = Time.time;
-                s.lastPos = target.transform.position;
             }
         }
     }
@@ -434,12 +470,14 @@ public class Radar : MonoBehaviour
         return new Vector2(d.x * right.x + d.z * right.z, -(d.x * centreForward.x + d.z * centreForward.z)) * scale;
     }
 
+    // the radar's diameter in pixels: the size setting, but never under the score at the top centre,
+    // never over the boxes at the bottom left and never off the screen
     float RadarSize()
     {
         float k = Screen.height / 1080f;
-        float size = sizeAt1080 * k;
-        // never under the score at the top centre (it takes about 260 px to each side)
-        size = Mathf.Min(size, Screen.width * 0.5f - 280f - margin * k);
+        float size = sizeAt1080 * k * SizeSetting;
+        size = Mathf.Min(size, Screen.width * 0.5f - (TopHudHalfWidth + 12f) * k - Mathf.Round(margin * k));
+        size = Mathf.Min(size, Screen.height - RadarTop(k) - BottomHudHeight * k);
         return Mathf.Max(64f, Mathf.Round(size));
     }
 
@@ -476,7 +514,7 @@ public class Radar : MonoBehaviour
         if (view == null || view.width != size || !view.IsCreated()) MakeView(size);
 
         float radius = DiscRadius(size);
-        float scale = radius / Mathf.Max(range, 1f);
+        float scale = radius / Range;
 
         RenderTexture previous = RenderTexture.active;
         RenderTexture.active = view;
@@ -489,7 +527,7 @@ public class Radar : MonoBehaviour
         Fan(blankTexture, 1f, size * 0.5f, radius, scale);
         float fade = mapTexture != null ? Mathf.Clamp01((Time.time - mapReadyAt) / 0.5f) : 0f;
         if (fade > 0f) Fan(mapTexture, fade, size * 0.5f, radius, scale);
-        DrawBuyZones(size * 0.5f, radius, scale);
+        DrawBuyZones(size * 0.5f, radius, scale, RingWidth(size));
 
         GL.PopMatrix();
         RenderTexture.active = previous;
@@ -567,25 +605,134 @@ public class Radar : MonoBehaviour
         GL.Vertex3(half + x, half + y, 0f);
     }
 
-    // the buy zones in normal games: the player's team green, the enemies' red. Each zone is a circle texture laid on
-    // the world like the map, so the same fan turns it with the view and cuts it at the radar's edge.
-    void DrawBuyZones(float half, float radius, float scale)
+    // the zone's rectangle in metres (x along the world X, y along the world Z); a zone without a size
+    // (an old round zone) becomes the square whose half diagonal is its radius
+    static Vector2 ZoneSize(RoundManager.BuyZone z)
+    {
+        if (z.size.x > 0f && z.size.y > 0f) return z.size;
+        float side = z.radius * 1.41421356f;
+        return new Vector2(side, side);
+    }
+
+    // the buy zones in normal games: the player's team green, the enemies' red. The inside is a texture laid on the
+    // world like the map, so the same fan turns it with the view and cuts it at the radar's edge; the outline is
+    // drawn on top with smooth edges and cut at the edge too.
+    void DrawBuyZones(float half, float radius, float scale, float lineWidth)
     {
         if (!Economy.Enabled || RoundManager.BuyZones.Count == 0 || playerHealth == null) return;
-        if (zoneTexture == null) zoneTexture = MakeZone(256);
+        if (zoneTexture == null) zoneTexture = MakeZone();
 
         int team = playerHealth.team;
-        float reach = Mathf.Max(range, 1f) * 1.5f;   // the radar's corner is range * sqrt 2 away
+        float reach = radius / scale;   // meters from the centre to the radar's edge
         foreach (RoundManager.BuyZone z in RoundManager.BuyZones)
         {
-            if (z.radius <= 0f) continue;
-            Vector2 d = new Vector2(z.center.x - centrePos.x, z.center.z - centrePos.z);
-            if (d.magnitude > reach + z.radius) continue;   // far off the radar
+            Vector2 extent = ZoneSize(z);
+            if (extent.x <= 0f || extent.y <= 0f) continue;
 
-            float side = z.radius * 2f / ZoneFill;
-            Vector2 origin = new Vector2(z.center.x - side * 0.5f, z.center.z - side * 0.5f);
-            Fan(zoneTexture, z.team == team ? ownZoneColor : enemyZoneColor, half, radius, scale, origin, new Vector2(side, side));
+            // the nearest point of the rectangle is beyond the radar's edge: nothing to draw
+            float dx = Mathf.Max(0f, Mathf.Abs(z.center.x - centrePos.x) - extent.x * 0.5f);
+            float dz = Mathf.Max(0f, Mathf.Abs(z.center.z - centrePos.z) - extent.y * 0.5f);
+            if (dx * dx + dz * dz > reach * reach) continue;
+
+            Color col = z.team == team ? ownZoneColor : enemyZoneColor;
+
+            // the inside: the middle half of the zone texture is the rectangle
+            Vector2 origin = new Vector2(z.center.x - extent.x, z.center.z - extent.y);
+            Fan(zoneTexture, new Color(col.r, col.g, col.b, col.a * ZoneInside), half, radius, scale, origin, extent * 2f);
+
+            // the outline through the corners
+            Vector3 hx = new Vector3(extent.x * 0.5f, 0f, 0f);
+            Vector3 hz = new Vector3(0f, 0f, extent.y * 0.5f);
+            zoneCorners[0] = ToRadar(z.center - hx - hz, scale);
+            zoneCorners[1] = ToRadar(z.center + hx - hz, scale);
+            zoneCorners[2] = ToRadar(z.center + hx + hz, scale);
+            zoneCorners[3] = ToRadar(z.center - hx + hz, scale);
+            // cut at the inner edge of the ring, so a side that leaves the radar at a slant stays under the ring
+            Outline(zoneCorners, col, half, radius - lineWidth * 0.5f, lineWidth);
         }
+    }
+
+    // a closed line through the corners (pixels from the centre), cut at the clip radius. Every side is a strip
+    // with a solid middle and a one pixel soft border on both sides, so it stays smooth while the radar turns.
+    void Outline(Vector2[] corners, Color color, float half, float clip, float width)
+    {
+        mapMaterial.mainTexture = Texture2D.whiteTexture;
+        mapMaterial.SetPass(0);
+        GL.Begin(GL.TRIANGLES);
+        GL.TexCoord2(0.5f, 0.5f);
+        for (int i = 0; i < corners.Length; i++)
+            Side(corners[i], corners[(i + 1) % corners.Length], color, half, clip, width);
+        GL.End();
+    }
+
+    static void Side(Vector2 a, Vector2 b, Color color, float half, float clip, float width)
+    {
+        if (!ClipToDisc(ref a, ref b, clip, out bool cutA, out bool cutB)) return;
+        Vector2 d = b - a;
+        if (d.sqrMagnitude < 0.0001f) return;
+        Vector2 dir = d.normalized;
+
+        // an end that was not cut goes on by half the width, so two sides meet in a square corner
+        float hw = width * 0.5f;
+        if (!cutA) a -= dir * hw;
+        if (!cutB) b += dir * hw;
+
+        Vector2 n = new Vector2(-dir.y, dir.x);
+        float core = Mathf.Max(0f, hw - 0.5f);
+        Color clear = new Color(color.r, color.g, color.b, 0f);
+        Strip(a, b, -n * core, n * core, color, color, half);
+        Strip(a, b, n * core, n * (core + 1f), color, clear, half);
+        Strip(a, b, -n * core, -n * (core + 1f), color, clear, half);
+    }
+
+    // two triangles between the lines a + inner .. b + inner and a + outer .. b + outer
+    static void Strip(Vector2 a, Vector2 b, Vector2 inner, Vector2 outer, Color innerColor, Color outerColor, float half)
+    {
+        StripVertex(a + inner, innerColor, half);
+        StripVertex(b + inner, innerColor, half);
+        StripVertex(b + outer, outerColor, half);
+        StripVertex(a + inner, innerColor, half);
+        StripVertex(b + outer, outerColor, half);
+        StripVertex(a + outer, outerColor, half);
+    }
+
+    static void StripVertex(Vector2 p, Color color, float half)
+    {
+        GL.Color(color);
+        GL.Vertex3(half + p.x, half + p.y, 0f);
+    }
+
+    // cuts the segment a - b (pixels from the centre) to the disc of radius r; false when nothing of it is inside.
+    // cutA / cutB: that end was moved to the disc's edge
+    static bool ClipToDisc(ref Vector2 a, ref Vector2 b, float r, out bool cutA, out bool cutB)
+    {
+        cutA = false;
+        cutB = false;
+        Vector2 d = b - a;
+        float qa = Vector2.Dot(d, d);
+        if (qa < 0.0001f) return false;
+        float qb = 2f * Vector2.Dot(a, d);
+        float qc = Vector2.Dot(a, a) - r * r;
+        float disc = qb * qb - 4f * qa * qc;
+        if (disc <= 0f) return false;
+
+        float root = Mathf.Sqrt(disc);
+        float t0 = (-qb - root) / (2f * qa);
+        float t1 = (-qb + root) / (2f * qa);
+        if (t0 >= 1f || t1 <= 0f) return false;
+
+        Vector2 start = a;
+        if (t0 > 0f)
+        {
+            a = start + d * t0;
+            cutA = true;
+        }
+        if (t1 < 1f)
+        {
+            b = start + d * t1;
+            cutB = true;
+        }
+        return true;
     }
 
     float RadarTop(float k)
@@ -596,14 +743,27 @@ public class Radar : MonoBehaviour
             TrainingTarget t = FindAnyObjectByType<TrainingTarget>();
             trainingPanel = t != null && t.isActiveAndEnabled;
         }
-        // in solo mode the training target's panel is in the top left corner (20, 80, 330 x 190): go under it
-        return trainingPanel ? 282f : Mathf.Round(margin * k);
+        // in solo mode the training target's panel is in the top left corner: go under it
+        return trainingPanel ? TrainingPanelBottom : Mathf.Round(margin * k);
+    }
+
+    // the TAB table is on the screen (a big radar on a narrow screen reaches under it)
+    bool ScoreboardShown()
+    {
+        if (scoreboard == null && Time.unscaledTime >= nextScoreboardSearch)
+        {
+            nextScoreboardSearch = Time.unscaledTime + 2f;
+            scoreboard = FindAnyObjectByType<Scoreboard>();
+        }
+        return scoreboard != null && scoreboard.isActiveAndEnabled && Input.GetKey(scoreboard.key) && !DevConsole.IsOpen;
     }
 
     void OnGUI()
     {
-        GUI.depth = -1;   // above the sniper scope, like in CS
+        // above the sniper scope, like in CS; under the TAB table while it is shown
+        GUI.depth = ScoreboardShown() ? 1 : -1;
         if (Event.current.type != EventType.Repaint || view == null || playerHealth == null || !Visible()) return;
+        if (BuyMenu.IsOpen) return;   // hidden under the buy menu, like the HUD
 
         int size = view.width;
         float k = Screen.height / 1080f;
@@ -621,11 +781,13 @@ public class Radar : MonoBehaviour
         GUI.color = Color.white;
         GUI.DrawTexture(r, ringTexture);
 
+        // the icons grow with the radar
         float s = size / 220f;
         float radius = DiscRadius(size);
-        float scale = radius / Mathf.Max(range, 1f);
+        float scale = radius / Range;
         float allySize = Mathf.Max(6f, 9f * s);
         float enemySize = Mathf.Max(6f, 10f * s);
+        float questionSize = Mathf.Max(10f, 17f * s);
         float arrowSize = Mathf.Max(10f, 17f * s);
         int team = playerHealth.team;
 
@@ -633,37 +795,55 @@ public class Radar : MonoBehaviour
         foreach (Health h in Health.All)
         {
             if (h == centreOwner || h.team != team || !Alive(h)) continue;
-            Dot(h.transform.position, allyColor, allySize, c, radius, scale);
+            Icon(h.transform.position, dotTexture, allyColor, allySize, c, radius, scale);
         }
 
-        // enemies: while spotted, then a fading dot where they were last seen
+        // enemies nobody sees any more: the dot goes out quickly and a "?" takes its place where he was last seen;
+        // it fades out at the end of lastSeenTime (under the dots of the enemies in sight)
+        float dotFade = Mathf.Max(fadeTime, 0.01f);
         foreach (KeyValuePair<Health, Spot> pair in spots)
         {
             Health h = pair.Key;
-            if (!Alive(h) || h.team == team) continue;
-
             Spot sp = pair.Value;
-            float a = sp.visible ? 1f : 1f - (Time.time - sp.lostAt) / Mathf.Max(fadeTime, 0.01f);
+            if (sp.visible || !Alive(h) || h.team == team) continue;
+
+            float age = Time.time - sp.lostAt;
+            float a = Mathf.Clamp01(age / dotFade) * Mathf.Clamp01((lastSeenTime - age) / Mathf.Max(lastSeenFade, 0.01f));
             if (a <= 0f) continue;
 
             Color col = enemyColor;
             col.a *= a;
-            Dot(sp.visible ? h.transform.position : sp.lastPos, col, enemySize, c, radius, scale);
+            Icon(sp.lastPos, questionTexture, col, questionSize, c, radius, scale);
+        }
+
+        // enemies in sight: a red dot; a dot just lost from sight fades out where he was seen
+        foreach (KeyValuePair<Health, Spot> pair in spots)
+        {
+            Health h = pair.Key;
+            Spot sp = pair.Value;
+            if (!Alive(h) || h.team == team) continue;
+
+            float a = sp.visible ? 1f : 1f - (Time.time - sp.lostAt) / dotFade;
+            if (a <= 0f) continue;
+
+            Color col = enemyColor;
+            col.a *= a;
+            Icon(sp.visible ? h.transform.position : sp.lastPos, dotTexture, col, enemySize, c, radius, scale);
         }
 
         GUI.color = Color.white;
         GUI.DrawTexture(new Rect(c.x - arrowSize * 0.5f, c.y - arrowSize * 0.5f, arrowSize, arrowSize), arrowTexture);
     }
 
-    // a dot outside the radar's range sits on its edge
-    void Dot(Vector3 world, Color color, float size, Vector2 centre, float radius, float scale)
+    // an icon outside the radar's range sits on its edge
+    void Icon(Vector3 world, Texture texture, Color color, float size, Vector2 centre, float radius, float scale)
     {
         Vector2 p = ToRadar(world, scale);
         float max = radius - size * 0.5f;
         if (p.sqrMagnitude > max * max) p = p.normalized * max;
 
         GUI.color = color;
-        GUI.DrawTexture(new Rect(centre.x + p.x - size * 0.5f, centre.y + p.y - size * 0.5f, size, size), dotTexture);
+        GUI.DrawTexture(new Rect(centre.x + p.x - size * 0.5f, centre.y + p.y - size * 0.5f, size, size), texture);
     }
 
     // ---------------- the map ----------------
@@ -916,32 +1096,25 @@ public class Radar : MonoBehaviour
         return t;
     }
 
-    // a white see-through circle with a solid outline, tinted by the team colour when drawn;
-    // a few mip levels only, so the clear edge stays clear (the texture is clamped)
-    static Texture2D MakeZone(int n)
+    // the inside of a buy zone: 4 x 4 texels, the middle 2 x 2 white, the ring around them clear. Laid on twice the
+    // zone's size, its middle half is the zone; point filtering keeps that edge exact and clamping keeps the rest clear.
+    // The team colour tints it when drawn.
+    static Texture2D MakeZone()
     {
-        float radius = n * 0.5f * ZoneFill;
-        float line = Mathf.Max(1.5f, radius * ZoneLine);
-        float c = n * 0.5f;
-        Color32[] px = new Color32[n * n];
-        for (int y = 0; y < n; y++)
-            for (int x = 0; x < n; x++)
+        Color32[] px = new Color32[16];
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 4; x++)
             {
-                float dx = x + 0.5f - c;
-                float dy = y + 0.5f - c;
-                float d = radius - Mathf.Sqrt(dx * dx + dy * dy);   // above zero inside
-                float inside = Mathf.Clamp01(d + 0.5f);
-                float rim = inside * Mathf.Clamp01(line + 0.5f - d);
-                float a = inside * ZoneInside + rim * (1f - ZoneInside);
-                px[y * n + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(a * 255f));
+                bool inside = x >= 1 && x <= 2 && y >= 1 && y <= 2;
+                px[y * 4 + x] = new Color32(255, 255, 255, (byte)(inside ? 255 : 0));
             }
 
-        Texture2D t = new Texture2D(n, n, TextureFormat.RGBA32, ZoneMips, false);
+        Texture2D t = new Texture2D(4, 4, TextureFormat.RGBA32, false);
         t.name = "Radar buy zone";
         t.wrapMode = TextureWrapMode.Clamp;
-        t.filterMode = FilterMode.Trilinear;
+        t.filterMode = FilterMode.Point;
         t.SetPixels32(px);
-        t.Apply(true, true);
+        t.Apply(false, true);
         return t;
     }
 
@@ -965,6 +1138,26 @@ public class Radar : MonoBehaviour
             new Vector2(0.16f, 0.1f) * n
         };
         return MakeShape(n, n * 0.07f, p => PolygonInside(p, poly));
+    }
+
+    // white question mark with a dark outline: a hook (over the top from the upper left, down the right side and back
+    // to the middle), a short stem under it and a dot at the bottom. Rows go up, like the arrow.
+    static Texture2D MakeQuestion(int n)
+    {
+        Vector2 hook = new Vector2(0.5f, 0.645f) * n;
+        float hookRadius = 0.195f * n;
+        float stroke = 0.078f * n;   // half the line width
+        Vector2 stemTop = new Vector2(hook.x, hook.y - hookRadius);
+        Vector2 stemEnd = new Vector2(hook.x, 0.4f * n);
+        Vector2 dot = new Vector2(hook.x, 0.165f * n);
+        float dotRadius = 0.088f * n;
+
+        return MakeShape(n, n * 0.06f, p =>
+        {
+            float s = stroke - ArcDistance(p, hook, hookRadius, -90f, 160f);
+            s = Mathf.Max(s, stroke - SegmentDistance(p, stemTop, stemEnd));
+            return Mathf.Max(s, dotRadius - Vector2.Distance(p, dot));
+        });
     }
 
     // inside: signed distance in texels, above zero inside the shape
@@ -1001,11 +1194,29 @@ public class Radar : MonoBehaviour
             Vector2 a = poly[j];
             Vector2 b = poly[i];
             if ((b.y > p.y) != (a.y > p.y) && p.x < (a.x - b.x) * (p.y - b.y) / (a.y - b.y) + b.x) inside = !inside;
-
-            Vector2 ab = b - a;
-            float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude);
-            best = Mathf.Min(best, Vector2.Distance(p, a + ab * t));
+            best = Mathf.Min(best, SegmentDistance(p, a, b));
         }
         return inside ? best : -best;
+    }
+
+    // distance from p to the segment a - b
+    static float SegmentDistance(Vector2 p, Vector2 a, Vector2 b)
+    {
+        Vector2 ab = b - a;
+        float t = ab.sqrMagnitude > 0f ? Mathf.Clamp01(Vector2.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+        return Vector2.Distance(p, a + ab * t);
+    }
+
+    // distance from p to the arc of a circle between two angles (degrees, counter-clockwise from +x, from < to,
+    // both inside -180 .. 180)
+    static float ArcDistance(Vector2 p, Vector2 centre, float radius, float from, float to)
+    {
+        Vector2 q = p - centre;
+        float angle = Mathf.Atan2(q.y, q.x) * Mathf.Rad2Deg;
+        if (angle >= from && angle <= to) return Mathf.Abs(q.magnitude - radius);
+
+        Vector2 a = centre + new Vector2(Mathf.Cos(from * Mathf.Deg2Rad), Mathf.Sin(from * Mathf.Deg2Rad)) * radius;
+        Vector2 b = centre + new Vector2(Mathf.Cos(to * Mathf.Deg2Rad), Mathf.Sin(to * Mathf.Deg2Rad)) * radius;
+        return Mathf.Min(Vector2.Distance(p, a), Vector2.Distance(p, b));
     }
 }

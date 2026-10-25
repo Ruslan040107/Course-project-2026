@@ -240,7 +240,8 @@ public class PlayerLoadout : MonoBehaviour
         if (!initialized) NewRound(false);
         if (health != null && health.IsDead) return;
         if (MainMenu.IsOpen || Time.timeScale <= 0f) return;
-        if (Cursor.lockState != CursorLockMode.Locked) return;
+        // the developer console owns the keys (1-4, Q) and the wheel while it is open
+        if (Cursor.lockState != CursorLockMode.Locked || DevConsole.IsOpen) return;
 
         for (int i = 0; i < SlotCount; i++)
             if (Input.GetKeyDown(KeyCode.Alpha1 + i)) Select(i);
@@ -312,7 +313,7 @@ public class PlayerLoadout : MonoBehaviour
         if (Event.current.type != EventType.Repaint) return;
 
         WeaponData inHands = current >= 0 ? owned[current] : null;
-        bool locked = Cursor.lockState == CursorLockMode.Locked;
+        bool locked = Cursor.lockState == CursorLockMode.Locked && !DevConsole.IsOpen;
         if (current != shownSlot || inHands != shownData || (locked && (Input.mouseScrollDelta.y != 0f || SlotKeyDown())))
         {
             shownSlot = current;

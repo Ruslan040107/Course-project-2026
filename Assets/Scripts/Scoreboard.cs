@@ -156,7 +156,8 @@ public class Scoreboard : MonoBehaviour
 
     void OnGUI()
     {
-        if (!Input.GetKey(key)) return;
+        // Tab completes commands in the developer console while it is open
+        if (!Input.GetKey(key) || DevConsole.IsOpen) return;
 
         if (rounds == null) rounds = FindAnyObjectByType<RoundManager>();
         if (player == null)

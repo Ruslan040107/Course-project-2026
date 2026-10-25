@@ -156,7 +156,10 @@ public class PlayerShoot : MonoBehaviour
         bool busy = weapon.IsDrawing || weapon.IsReloading;
         if (dead || levels == 0 || busy) ResetZoom();
 
-        if (!dead && !busy && levels > 0 && Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButtonDown(1))
+        // the mouse buttons and keys belong to the game only while the cursor is locked and the developer console is closed
+        bool locked = Cursor.lockState == CursorLockMode.Locked && !DevConsole.IsOpen;
+
+        if (!dead && !busy && levels > 0 && locked && Input.GetMouseButtonDown(1))
             desiredZoom = (desiredZoom + 1) % (levels + 1);
 
         zoomLevel = Time.time < boltUntil ? 0 : desiredZoom;
@@ -167,13 +170,13 @@ public class PlayerShoot : MonoBehaviour
 
         // R8: fanning spread for the crosshair while right click is held; letting go of the left button (or a menu taking the
         // cursor) before the hammer is fully pulled cancels the shot
-        weapon.AltFireHeld = !dead && weapon.HasAltFire && !weapon.HasBurstMode && Cursor.lockState == CursorLockMode.Locked
+        weapon.AltFireHeld = !dead && weapon.HasAltFire && !weapon.HasBurstMode && locked
             && Input.GetMouseButton(1) && !Input.GetButton("Fire1");
-        if (!dead && weapon.IsHammerPulling && (!Input.GetButton("Fire1") || Cursor.lockState != CursorLockMode.Locked))
+        if (!dead && weapon.IsHammerPulling && (!Input.GetButton("Fire1") || !locked))
             weapon.CancelHammer();
 
         if (dead) return;
-        if (Cursor.lockState != CursorLockMode.Locked) return;
+        if (!locked) return;
         // the click that took the cursor back (or closed a menu) is not a shot
         if (Time.frameCount - MainMenu.LastClosedFrame <= 1) return;
 
@@ -224,12 +227,13 @@ public class PlayerShoot : MonoBehaviour
         if (zoomLevel == 0) return;
         if (weapon == null || weapon.IsDrawing) return;
 
-        // optic: a round view with darkened edges (ViewModel hides the gun once it is at the eye) and a red dot
+        // optic: a round view with darkened edges (ViewModel hides the gun once it is at the eye), a reticle and a red dot
         if (IsOpticZoom)
         {
             if (currentFov < baseFov - 4f)
             {
                 DrawOpticView();
+                DrawOpticReticle();
                 DrawOpticDot();
             }
             return;
@@ -296,6 +300,79 @@ public class PlayerShoot : MonoBehaviour
     }
 
     const float OpticOutsideAlpha = 0.82f;
+
+    // the reticle of an optic (SG 553, AUG), like a small rifle scope: thin black lines through the view with a gap
+    // in the middle, thick posts near the rim and a small circle around the red dot (DrawOpticDot draws the dot on top);
+    // the sizes follow the screen height, like the sniper scope
+    void DrawOpticReticle()
+    {
+        float h = Screen.height;
+        float k = h / 1080f;
+        float cx = Mathf.Floor(Screen.width * 0.5f);
+        float cy = Mathf.Floor(h * 0.5f);
+
+        float reach = Mathf.Round(h * 0.4f);          // into the dark rim of the optic view
+        float post = Mathf.Round(reach * 0.6f);        // the thick posts from here to the rim
+        float gap = Mathf.Round(30f * k);              // the thin lines start this far from the middle
+        float thin = Mathf.Max(1f, Mathf.Round(1.5f * k));
+        float thick = Mathf.Max(2f, Mathf.Round(5f * k));
+        float ty = Mathf.Round(cy - thin * 0.5f), tx = Mathf.Round(cx - thin * 0.5f);
+        float py = Mathf.Round(cy - thick * 0.5f), px = Mathf.Round(cx - thick * 0.5f);
+
+        GUI.color = new Color(0f, 0f, 0f, 0.85f);
+        Texture2D white = Texture2D.whiteTexture;
+
+        // thin lines: left, right, up, down
+        GUI.DrawTexture(new Rect(cx - post, ty, post - gap, thin), white);
+        GUI.DrawTexture(new Rect(cx + gap, ty, post - gap, thin), white);
+        GUI.DrawTexture(new Rect(tx, cy - post, thin, post - gap), white);
+        GUI.DrawTexture(new Rect(tx, cy + gap, thin, post - gap), white);
+
+        // thick posts at the rim
+        GUI.DrawTexture(new Rect(cx - reach, py, reach - post, thick), white);
+        GUI.DrawTexture(new Rect(cx + post, py, reach - post, thick), white);
+        GUI.DrawTexture(new Rect(px, cy - reach, thick, reach - post), white);
+        GUI.DrawTexture(new Rect(px, cy + post, thick, reach - post), white);
+
+        // the small circle around the dot, inside the gap of the lines
+        int r = Mathf.Max(4, Mathf.RoundToInt(16f * k));
+        int w = Mathf.RoundToInt(thin);
+        int n = 2 * (r + w) + 2;
+        if (ringTexture == null || ringSize != n || ringWidth != w)
+        {
+            if (ringTexture != null) Destroy(ringTexture);
+            ringTexture = MakeRingTexture(n, r, w);
+            ringSize = n;
+            ringWidth = w;
+        }
+        GUI.DrawTexture(new Rect(cx - n * 0.5f, cy - n * 0.5f, n, n), ringTexture);
+        GUI.color = Color.white;
+    }
+
+    Texture2D ringTexture;
+    int ringSize;
+    int ringWidth;
+
+    // a white ring with soft edges (tinted by GUI.color): n x n pixels, radius r and width w in pixels
+    static Texture2D MakeRingTexture(int n, float r, float w)
+    {
+        Texture2D tex = new Texture2D(n, n, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+
+        Vector2 c = new Vector2(n - 1, n - 1) * 0.5f;
+        for (int y = 0; y < n; y++)
+        {
+            for (int x = 0; x < n; x++)
+            {
+                float d = Vector2.Distance(new Vector2(x, y), c);
+                float a = Mathf.Clamp01(w * 0.5f + 0.5f - Mathf.Abs(d - r));
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+            }
+        }
+
+        tex.Apply();
+        return tex;
+    }
 
     // clear up to 78% of the half size, a dark rim, then the dimmed outside
     Texture2D MakeOpticTexture()

@@ -549,7 +549,7 @@ public class WeaponDrops : MonoBehaviour
     {
         if (player == null || loadout == null || playerHealth == null || playerHealth.IsDead) return false;
         if (!player.isActiveAndEnabled) return false;
-        if (MainMenu.IsOpen || BuyMenu.IsOpen || Time.timeScale <= 0f) return false;
+        if (MainMenu.IsOpen || BuyMenu.IsOpen || DevConsole.IsOpen || Time.timeScale <= 0f) return false;
         return Cursor.lockState == CursorLockMode.Locked;
     }
 
