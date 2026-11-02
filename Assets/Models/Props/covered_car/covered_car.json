@@ -1,0 +1,67 @@
+{
+  "slug": "covered_car",
+  "source": "https://polyhaven.com/a/covered_car",
+  "license": "CC0",
+  "authors": "MP",
+  "size": [
+    1.789,
+    1.4111,
+    4.3803
+  ],
+  "bottomCentre": [
+    -0.0478,
+    0.0,
+    0.0238
+  ],
+  "tris": 12592,
+  "materials": [
+    {
+      "name": "covered_car",
+      "baseMap": "covered_car_diff_1k.jpg",
+      "normalMap": "covered_car_nor_gl_1k.jpg",
+      "maskMap": "covered_car_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "covered_car_2",
+      "baseMap": "covered_car_diff_1k.jpg",
+      "normalMap": "covered_car_nor_gl_1k.jpg",
+      "maskMap": "covered_car_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

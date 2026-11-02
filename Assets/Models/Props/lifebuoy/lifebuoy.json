@@ -1,0 +1,43 @@
+{
+  "slug": "lifebuoy",
+  "source": "https://polyhaven.com/a/lifebuoy",
+  "license": "CC0",
+  "authors": "Hank Kaamura",
+  "size": [
+    0.7831,
+    0.8412,
+    0.1551
+  ],
+  "bottomCentre": [
+    -0.0012,
+    -0.4622,
+    0.0068
+  ],
+  "tris": 10728,
+  "materials": [
+    {
+      "name": "lifebuoy",
+      "baseMap": "lifebuoy_diff_1k.jpg",
+      "normalMap": "lifebuoy_nor_gl_1k.jpg",
+      "maskMap": "lifebuoy_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

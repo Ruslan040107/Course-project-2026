@@ -1,0 +1,67 @@
+{
+  "slug": "industrial_wall_lamp",
+  "source": "https://polyhaven.com/a/industrial_wall_lamp",
+  "license": "CC0",
+  "authors": "Kuutti Siitonen",
+  "size": [
+    0.2735,
+    0.4299,
+    0.1404
+  ],
+  "bottomCentre": [
+    -0.0,
+    -0.215,
+    0.0702
+  ],
+  "tris": 4446,
+  "materials": [
+    {
+      "name": "industrial_wall_lamp",
+      "baseMap": "industrial_wall_lamp_diff_1k.jpg",
+      "normalMap": "industrial_wall_lamp_nor_gl_1k.jpg",
+      "maskMap": "industrial_wall_lamp_ms_1k.png",
+      "emissionMap": "industrial_wall_lamp_emissive_1k.jpg",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        100,
+        100,
+        100
+      ],
+      "metallic": 0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "industrial_wall_lamp_glass",
+      "baseMap": "industrial_wall_lamp_glass_diff_1k.jpg",
+      "normalMap": "industrial_wall_lamp_glass_nor_gl_1k.jpg",
+      "maskMap": "industrial_wall_lamp_glass_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 0,
+      "roughness": 1.0,
+      "alphaMode": "BLEND",
+      "alphaCutoff": 0.5,
+      "transmission": 1,
+      "doubleSided": true
+    }
+  ]
+}

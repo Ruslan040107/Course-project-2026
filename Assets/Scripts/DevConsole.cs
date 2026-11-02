@@ -607,6 +607,20 @@ public class DevConsole : MonoBehaviour
             case "endround":
                 AddMatching(list, t, "t", "ct", "draw");
                 break;
+            case "map":
+                if (words.Length > 1) break;
+                // the maps in the build, in the alphabet of what is typed
+                foreach (MainMenu.MapInfo m in MainMenu.Maps)
+                {
+                    if (!MainMenu.MapInBuild(m.scene)) continue;
+                    foreach (string w in m.words)
+                        if (HasCyrillic(w) == HasCyrillic(t) && w.StartsWith(t, System.StringComparison.Ordinal) && !list.Contains(w))
+                        {
+                            list.Add(w);
+                            break;
+                        }
+                }
+                break;
         }
         return list;
     }
@@ -1200,6 +1214,13 @@ public class DevConsole : MonoBehaviour
 
         Add("status", "status", "что сейчас: карта, счёт, живые, деньги, включённые команды", CmdStatus);
         Alias("статус", "status");
+
+        Add("map", "map [карта]", "загрузить карту: arena, desert, borgo, porto (тот же режим и размер команд)", CmdMap,
+            "Имена по-русски тоже: арена, пустыня, борго, порт. Без имени — список карт и какие есть в сборке.",
+            "Бой начинается заново с тем же числом игроков в команде, тренировка остаётся тренировкой.",
+            "Примеры: map desert · карта борго · map porto");
+        Alias("карта", "map");
+        Alias("changelevel", "map");
     }
 
     void CmdHelp(string[] a)
@@ -1656,8 +1677,7 @@ public class DevConsole : MonoBehaviour
     void CmdStatus(string[] a)
     {
         if (!NeedRounds()) return;
-        string scene = SceneManager.GetActiveScene().name;
-        string map = scene == MainMenu.DesertScene ? "Пустыня" : scene == MainMenu.ArenaScene ? "Арена" : scene;
+        string map = MainMenu.MapName();
 
         int[] alive = new int[2], total = new int[2];
         foreach (Health h in Health.All)
@@ -1708,6 +1728,67 @@ public class DevConsole : MonoBehaviour
         if (wantedTimeScale > 0f) on.Add("timescale " + Num(wantedTimeScale));
         if (showFps) on.Add("fps");
         Say("Включено: " + (on.Count > 0 ? string.Join(", ", on) : "ничего"));
+    }
+
+    // Another map, like the main menu: the same mode (training or a battle) with the same number of players per team
+    // as the match now; the menu remembers the map. Without a name: the maps, which are in the build, the current one.
+    void CmdMap(string[] a)
+    {
+        string current = SceneManager.GetActiveScene().name;
+        if (a.Length == 0)
+        {
+            Say("Карта сейчас: " + MainMenu.MapName(current));
+            foreach (MainMenu.MapInfo m in MainMenu.Maps)
+            {
+                bool inBuild = MainMenu.MapInBuild(m.scene);
+                string line = "  " + (m.words[0] + " / " + m.words[1]).PadRight(20) + m.name
+                    + (m.scene == current ? "  (сейчас)" : "") + (inBuild ? "" : "  — нет в сборке");
+                Print(line, inBuild ? TextColor : DimColor);
+            }
+            return;
+        }
+
+        string want = string.Join(" ", a).ToLowerInvariant();
+        int index = FindMap(want);
+        if (index < 0 && HasCyrillic(want)) index = FindMap(FromRussianLayout(want).ToLowerInvariant());
+        if (index < 0)
+        {
+            Error("Нет такой карты: " + string.Join(" ", a) + ". Карты: arena, desert, borgo, porto (map — список)");
+            return;
+        }
+        MainMenu.MapInfo map = MainMenu.Maps[index];
+        if (!MainMenu.MapInBuild(map.scene))
+        {
+            Error("Карта «" + map.name + "» (" + map.scene + ") не добавлена в сборку");
+            return;
+        }
+
+        FindGame();
+        bool solo = rounds != null && rounds.IsSolo;
+        int size = Mathf.Clamp(rounds != null ? rounds.botsPerTeam : GameSettings.TeamSize, GameSettings.MinTeamSize, GameSettings.MaxTeamSize);
+        Ok("Загружается " + map.name + (solo ? " · тренировка" : " · бой " + size + "×" + size));
+
+        GameSettings.PendingSolo = solo;
+        GameSettings.PendingBotsPerTeam = solo ? (int?)null : size;
+        GameSettings.MenuDone = true;
+        GameSettings.MenuMap = map.scene;
+        GameSettings.SaveMatchOptions();
+        // the console's speed stays with this map (the new one starts at 1, like from the menu)
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(map.scene);
+    }
+
+    // the index in MainMenu.Maps of a map by one of its words or its scene name, -1 if none
+    static int FindMap(string word)
+    {
+        word = word.Trim();
+        for (int i = 0; i < MainMenu.Maps.Length; i++)
+        {
+            if (MainMenu.Maps[i].scene.ToLowerInvariant() == word) return i;
+            foreach (string w in MainMenu.Maps[i].words)
+                if (w == word) return i;
+        }
+        return -1;
     }
 
     // ---------------- fps ----------------

@@ -1,0 +1,43 @@
+{
+  "slug": "worn_metal_rack",
+  "source": "https://polyhaven.com/a/worn_metal_rack",
+  "license": "CC0",
+  "authors": "Luca B",
+  "size": [
+    0.9154,
+    1.9,
+    0.6
+  ],
+  "bottomCentre": [
+    0.0023,
+    -0.0,
+    -0.0
+  ],
+  "tris": 6372,
+  "materials": [
+    {
+      "name": "worn_metal_rack",
+      "baseMap": "worn_metal_rack_diff_1k.jpg",
+      "normalMap": "worn_metal_rack_nor_gl_1k.jpg",
+      "maskMap": "worn_metal_rack_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

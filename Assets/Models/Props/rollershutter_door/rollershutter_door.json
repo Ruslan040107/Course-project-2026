@@ -1,0 +1,67 @@
+{
+  "slug": "rollershutter_door",
+  "source": "https://polyhaven.com/a/rollershutter_door",
+  "license": "CC0",
+  "authors": "MP",
+  "size": [
+    3.08,
+    2.4,
+    0.3001
+  ],
+  "bottomCentre": [
+    -1.0,
+    0.0,
+    0.149
+  ],
+  "tris": 1104,
+  "materials": [
+    {
+      "name": "rollershutter_door",
+      "baseMap": "rollershutter_door_diff_1k.jpg",
+      "normalMap": "rollershutter_door_nor_gl_1k.jpg",
+      "maskMap": "rollershutter_door_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "rollershutter_door_graffiti",
+      "baseMap": "rollershutter_door_graffiti_diff_1k.jpg",
+      "normalMap": "rollershutter_door_nor_gl_1k.jpg",
+      "maskMap": "rollershutter_door_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

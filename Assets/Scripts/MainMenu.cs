@@ -4,7 +4,8 @@ using UnityEngine.SceneManagement;
 
 // Main menu, pause menu and settings, drawn with IMGUI on top of everything else (GUI.depth -100).
 // - Main menu: shown once when the game starts (GameSettings.MenuDone == false) over the frozen game:
-//   training (solo on the arena), N×N on the arena, N×N on the desert map, the match options, settings, quit.
+//   the map (◄ ► or the mouse wheel: Арена, Пустыня, Борго, Порт, each only when its scene is in the build; saved),
+//   training (solo) and N×N on that map, the match options, settings, quit.
 //   Match options: players per team 1..10 with the player (−/+ or the mouse wheel; default = the first scene's
 //   RoundManager.botsPerTeam from the Inspector, the choice is saved and is dropped when that Inspector value
 //   changes) and "Боты стоят на месте" (static bots, saved; it also works at once from the pause → main menu).
@@ -12,11 +13,12 @@ using UnityEngine.SceneManagement;
 //   PendingBotsPerTeam and BotsFrozen when the match starts.
 // - Pause: Escape during play. Escape again or "Продолжить" goes back to the game.
 //   The Escape that closes the buy menu or the developer console does not open the pause.
-// - Settings in two columns: on the left "Игра" (mouse sensitivity, sensitivity in the zoom, FOV, volume),
-//   "Радар" (on/off, size on the screen, zoom) and a live preview of the crosshair; on the right "Прицел"
-//   (style, colour, size, gap, thickness, length, outline, dynamic; GameHud draws it) and "Экран" (window mode:
-//   windowed / full screen / borderless full screen, resolution from the monitor's list, the current one marked).
-//   A narrow or low screen gets one scrolling column. Changes work at once, except the screen mode and
+// - Settings in two columns: on the left "Игра" (mouse sensitivity, sensitivity in the zoom, FOV, volume, the agent
+//   for T and for CT), "Радар" (on/off, size on the screen, zoom) and a live preview of the crosshair; on the right
+//   "Прицел" (style, colour, size, gap, thickness, length, outline, dynamic; GameHud draws it) and "Экран" (window
+//   mode: windowed / full screen / borderless full screen, resolution from the monitor's list, the current one marked,
+//   anti-aliasing (MSAA, only in a build), "Boost player contrast"). The rows get a little lower when that keeps two
+//   columns; a narrow or low screen gets one scrolling column. Changes work at once, except the screen mode and
 //   resolution: they go on the window when saved. "Сохранить" writes everything to PlayerPrefs,
 //   "Назад" (or Escape) drops the unsaved changes, "По умолчанию" resets everything but the screen.
 // While a menu is open the game is paused (Time.timeScale = 0, sound paused) and the cursor is free:
@@ -28,6 +30,46 @@ public class MainMenu : MonoBehaviour
 {
     public const string ArenaScene = "SampleScene";
     public const string DesertScene = "DesertMap";
+    public const string BorgoScene = "BorgoMap";
+    public const string PortoScene = "PortoMap";
+
+    // the maps of the menu and of the console (DevConsole "map"): the scene, its name, one line about it and the words
+    // the console takes for it. A map is offered only when its scene is in the build (MapInBuild).
+    public struct MapInfo
+    {
+        public string scene, name, hint;
+        public string[] words;
+
+        public MapInfo(string scene, string name, string hint, params string[] words)
+        {
+            this.scene = scene;
+            this.name = name;
+            this.hint = hint;
+            this.words = words;
+        }
+    }
+
+    public static readonly MapInfo[] Maps =
+    {
+        new MapInfo(ArenaScene, "Арена", "Арена 50×50 м с укрытиями", "arena", "арена", "samplescene"),
+        new MapInfo(DesertScene, "Пустыня", "Большая карта 80×64 м: три линии, тоннели, двери", "desert", "пустыня", "desertmap"),
+        new MapInfo(BorgoScene, "Борго", "Итальянский городок 96×76 м: площадь с фонтаном, терраса A, балкон B", "borgo", "борго", "borgomap"),
+        new MapInfo(PortoScene, "Порт", "Порт 104×80 м: контейнеры, док и мостки A, резервуары B", "porto", "порт", "port", "portomap"),
+    };
+
+    // the scene can be loaded (it is in the build list)
+    public static bool MapInBuild(string scene)
+    {
+        return !string.IsNullOrEmpty(scene) && Application.CanStreamedLevelBeLoaded(scene);
+    }
+
+    // the Russian name of a map scene (the scene name itself for other scenes)
+    public static string MapName(string scene)
+    {
+        foreach (MapInfo m in Maps)
+            if (m.scene == scene) return m.name;
+        return scene;
+    }
 
     enum Page { None, Main, Pause, Settings }
 
@@ -50,21 +92,25 @@ public class MainMenu : MonoBehaviour
     Page page = Page.None;
     Page settingsBack = Page.Main;   // where "Назад" in the settings goes
     bool mainFromPause;              // the main menu was opened from the pause: Escape goes back there
-    bool desertAvailable;
+    // the maps in the build (indices of Maps) and the chosen one (an index of that list)
+    readonly System.Collections.Generic.List<int> maps = new System.Collections.Generic.List<int>();
+    int mapChoice;
     float savedUntil;                // "Настройки сохранены" is shown until this unscaled time
     int consoleFrame = -10;          // the last frame the developer console was seen open
 
     RoundManager rounds;
 
-    // texts that depend on the team size, rebuilt when it changes
-    int textsFor = -1;
-    string arenaTitle, desertTitle, subtitleText, teamHint;
+    // texts that depend on the team size and the map, rebuilt when they change
+    int textsFor = -1, textsMap = -1;
+    string trainingTitle, battleTitle, subtitleText, teamHint;
 
     struct Snapshot
     {
         public float sensitivity, zoomSensitivity, fov, volume, crosshairSize;
         public int crosshairColor;
         public bool radar;
+        public bool boostContrast;
+        public int antiAliasing, agentT, agentCT;
         public CrosshairStyle crosshairStyle;
         public float crosshairGap, crosshairThickness, crosshairLength;
         public bool crosshairOutline, crosshairDynamic;
@@ -94,7 +140,7 @@ public class MainMenu : MonoBehaviour
     int stylesFor = -1;
     GUIStyle titleStyle, subtitleStyle, pageTitleStyle, buttonStyle, buttonCenterStyle, hintStyle;
     GUIStyle labelStyle, valueStyle, infoStyle, footerStyle, statusStyle, smallButtonStyle;
-    GUIStyle labelSmallStyle, optionValueStyle;
+    GUIStyle labelSmallStyle, optionValueStyle, hintSmallStyle;
     GUIStyle sliderStyle, thumbStyle, sectionStyle, previewCaptionStyle;
     Texture2D backgroundTexture, thumbTexture;
 
@@ -169,7 +215,7 @@ public class MainMenu : MonoBehaviour
 
         if (player == null) player = FindAnyObjectByType<PlayerController>();
 
-        desertAvailable = Application.CanStreamedLevelBeLoaded(DesertScene);
+        FindMaps();
         thumbTexture = MakeCircle(64);
 
         if (!GameSettings.MenuDone) Open(Page.Main);
@@ -252,16 +298,45 @@ public class MainMenu : MonoBehaviour
         GameSettings.SaveMatchOptions();
     }
 
-    // "Бой 5×5 — Арена", the subtitle and "Ты и 4 бота против 5 ботов" for the current team size
+    // the maps whose scenes are in the build; the chosen one: the saved choice, else the scene the game runs, else the first
+    void FindMaps()
+    {
+        maps.Clear();
+        for (int i = 0; i < Maps.Length; i++)
+            if (MapInBuild(Maps[i].scene)) maps.Add(i);
+
+        mapChoice = 0;
+        string active = SceneManager.GetActiveScene().name;
+        for (int i = 0; i < maps.Count; i++)
+            if (Maps[maps[i]].scene == active) mapChoice = i;
+        for (int i = 0; i < maps.Count; i++)
+            if (Maps[maps[i]].scene == GameSettings.MenuMap) mapChoice = i;
+    }
+
+    // the chosen map (the arena when the build has none of them)
+    MapInfo ChosenMap => maps.Count > 0 ? Maps[maps[Mathf.Clamp(mapChoice, 0, maps.Count - 1)]] : Maps[0];
+
+    void StepMap(int step)
+    {
+        if (maps.Count < 2) return;
+        mapChoice = (mapChoice + step + maps.Count) % maps.Count;
+        GameSettings.MenuMap = ChosenMap.scene;
+        GameSettings.SaveMatchOptions();
+    }
+
+    // "Бой 5×5 — Пустыня", "Тренировка — Пустыня", the subtitle and "Ты и 4 бота против 5 ботов"
+    // for the current team size and map
     void BuildTeamTexts()
     {
         int n = TeamSize;
-        if (n == textsFor) return;
+        if (n == textsFor && mapChoice == textsMap) return;
         textsFor = n;
+        textsMap = mapChoice;
 
         string size = n + "×" + n;
-        arenaTitle = "Бой " + size + " — Арена";
-        desertTitle = "Бой " + size + " — Пустыня";
+        string map = ChosenMap.name;
+        trainingTitle = "Тренировка — " + map;
+        battleTitle = "Бой " + size + " — " + map;
         subtitleText = "Тактический шутер " + n + " на " + n + " против ботов";
 
         int allies = n - 1;
@@ -389,6 +464,10 @@ public class MainMenu : MonoBehaviour
         s.display = GameSettings.Display;
         s.screenWidth = GameSettings.ScreenWidth;
         s.screenHeight = GameSettings.ScreenHeight;
+        s.boostContrast = GameSettings.BoostPlayerContrast;
+        s.antiAliasing = GameSettings.AntiAliasing;
+        s.agentT = GameSettings.AgentT;
+        s.agentCT = GameSettings.AgentCT;
         return s;
     }
 
@@ -412,6 +491,10 @@ public class MainMenu : MonoBehaviour
         GameSettings.Display = s.display;
         GameSettings.ScreenWidth = s.screenWidth;
         GameSettings.ScreenHeight = s.screenHeight;
+        GameSettings.BoostPlayerContrast = s.boostContrast;
+        GameSettings.AntiAliasing = s.antiAliasing;
+        GameSettings.AgentT = s.agentT;
+        GameSettings.AgentCT = s.agentCT;
     }
 
     // the screen mode or resolution was changed and is not saved (it goes on the window only when saved)
@@ -440,7 +523,11 @@ public class MainMenu : MonoBehaviour
             || GameSettings.CrosshairOutline != snapshot.crosshairOutline
             || GameSettings.CrosshairDynamic != snapshot.crosshairDynamic
             || Mathf.Abs(GameSettings.RadarSize - snapshot.radarSize) > e
-            || Mathf.Abs(GameSettings.RadarZoom - snapshot.radarZoom) > e;
+            || Mathf.Abs(GameSettings.RadarZoom - snapshot.radarZoom) > e
+            || GameSettings.BoostPlayerContrast != snapshot.boostContrast
+            || GameSettings.AntiAliasing != snapshot.antiAliasing
+            || GameSettings.AgentT != snapshot.agentT
+            || GameSettings.AgentCT != snapshot.agentCT;
     }
 
     // ---------------- drawing ----------------
@@ -499,31 +586,29 @@ public class MainMenu : MonoBehaviour
         Fill(new Rect(w * 0.5f + 4f * k, 250f * k, stripe * 0.5f - 4f * k, 5f * k), CTColor);
         GUI.Label(new Rect(0f, 266f * k, w, 38f * k), subtitleText, subtitleStyle);
 
-        float bw = Mathf.Min(620f * k, w - 32f);
+        float bw = Mathf.Min(680f * k, w - 32f);
         float bx = (w - bw) * 0.5f;
         float y = 326f * k;
         float modeH = 84f * k;
         float optionH = 78f * k;
         float gap = 10f * k;
 
-        if (MenuButton(new Rect(bx, y, bw, modeH), "Тренировка",
-                "Арена без ботов: мишень и бесконечные патроны", true, false, false))
-            StartMode(ArenaScene, true);
+        // the map of both modes under it
+        MapRow(new Rect(bx, y, bw, modeH));
         y += modeH + gap;
 
-        if (MenuButton(new Rect(bx, y, bw, modeH), arenaTitle,
-                "Арена 50×50 м с укрытиями", true, false, false))
-            StartMode(ArenaScene, false);
+        MapInfo map = ChosenMap;
+        bool inBuild = MapInBuild(map.scene);
+        if (MenuButton(new Rect(bx, y, bw, modeH), trainingTitle,
+                "Без ботов: мишень и бесконечные патроны", inBuild, false, false))
+            StartMode(map.scene, true);
         y += modeH + gap;
 
-        string desertHint = desertAvailable
-            ? "Большая карта 80×64 м: три линии, тоннели, двери"
-            : "Карта не добавлена в сборку (Tools → Build Desert Map)";
-        if (MenuButton(new Rect(bx, y, bw, modeH), desertTitle, desertHint, desertAvailable, false, false))
-            StartMode(DesertScene, false);
+        if (MenuButton(new Rect(bx, y, bw, modeH), battleTitle, map.hint, inBuild, false, false))
+            StartMode(map.scene, false);
         y += modeH + 14f * k;
 
-        // the options of the two battles above (not of the training)
+        // the options of the battle above (not of the training)
         TeamSizeRow(new Rect(bx, y, bw, optionH));
         y += optionH + 8f * k;
         FrozenBotsRow(new Rect(bx, y, bw, optionH));
@@ -538,6 +623,60 @@ public class MainMenu : MonoBehaviour
             + "1–4, колесо, Q — оружие    ПКМ — прицел / режим огня    B — закупка    G / E — выбросить / поднять    TAB — счёт    Ё — консоль    Esc — пауза";
         if (mainFromPause) footer = "Esc — назад к паузе\n" + footer;
         GUI.Label(new Rect(16f, h - 110f * k, w - 32f, 96f * k), footer, footerStyle);
+    }
+
+    // "Карта  [◄] Пустыня [►]" with "Карта 2 из 4" under it; the mouse wheel over the row and a click on it work too
+    void MapRow(Rect r)
+    {
+        Event e = Event.current;
+        bool hover = r.Contains(e.mousePosition);
+        Fill(r, hover ? ButtonHover : ButtonColor);
+        Frame(r, BorderColor);
+        if (hover) Fill(new Rect(r.x, r.y, Mathf.Max(3f, 6f * k), r.height), Accent);
+
+        bool several = maps.Count > 1;
+        float padX = 28f * k;
+        float s = Mathf.Round(48f * k);
+        float valueW = Mathf.Round(190f * k);
+        Rect next = new Rect(r.xMax - padX - s, Mathf.Round(r.center.y - s * 0.5f), s, s);
+        Rect value = new Rect(next.x - valueW, r.y, valueW, r.height);
+        Rect prev = new Rect(value.x - s, next.y, s, s);
+
+        string hint = !several ? "Другие карты не добавлены в сборку"
+            : "Карта " + (mapChoice + 1) + " из " + maps.Count + " · колесо мыши — следующая";
+        float textW = Mathf.Max(0f, prev.x - 16f * k - (r.x + padX));
+        // a small window: only "Карта 2 из 4" when the whole line does not fit even in the smaller font
+        if (several && !FitsSmall(hint, textW)) hint = "Карта " + (mapChoice + 1) + " из " + maps.Count;
+        GUI.Label(new Rect(r.x + padX, r.y + 10f * k, textW, 40f * k), "Карта", buttonStyle);
+        GUI.Label(new Rect(r.x + padX, r.y + 50f * k, textW, 28f * k), hint, FittingHint(hint, textW));
+
+        int step = 0;
+        if (SmallButton(prev, "◄", several)) step = -1;
+        if (SmallButton(next, "►", several)) step = 1;
+        GUI.Label(value, ChosenMap.name, optionValueStyle);
+
+        // wheel down = the next map, like the list goes down
+        if (hover && e.type == EventType.ScrollWheel && e.delta.y != 0f)
+        {
+            step = e.delta.y > 0f ? 1 : -1;
+            e.Use();
+        }
+        // a click on the rest of the row = the next map (the arrows took their own clicks)
+        if (GUI.Button(r, GUIContent.none, GUIStyle.none) && step == 0) step = 1;
+        if (step != 0) StepMap(step);
+    }
+
+    // the hint style, or the smaller one when the text is wider than the room for it
+    GUIStyle FittingHint(string text, float width)
+    {
+        tempContent.text = text;
+        return hintStyle.CalcSize(tempContent).x > width ? hintSmallStyle : hintStyle;
+    }
+
+    bool FitsSmall(string text, float width)
+    {
+        tempContent.text = text;
+        return hintSmallStyle.CalcSize(tempContent).x <= width;
     }
 
     // "Игроков в команде  [−] 5 [+]" with "Ты и 4 бота против 5 ботов" under it; the mouse wheel over the row works too
@@ -663,43 +802,45 @@ public class MainMenu : MonoBehaviour
         return line;
     }
 
-    static string MapName()
+    // the name of the map that is loaded now
+    public static string MapName()
     {
-        string scene = SceneManager.GetActiveScene().name;
-        if (scene == ArenaScene) return "Арена";
-        if (scene == DesertScene) return "Пустыня";
-        return scene;
+        return MapName(SceneManager.GetActiveScene().name);
     }
 
     // Two columns side by side (on the left "Игра", "Радар" and the crosshair preview, on the right "Прицел" and
-    // "Экран"); on a narrow or low screen one column in a scroll view. Status line and the buttons stay under the rows.
+    // "Экран"); the rows get lower (60 px at 1080p, not under 50) so the two columns fit; on a narrow or low screen
+    // one column in a scroll view. Status line and the buttons stay under the rows.
     void DrawSettings()
     {
         float pad = 36f * k;
-        rowH = Mathf.Round(60f * k);
         float headH = Mathf.Round(44f * k);
         float bh = 64f * k;
         float colGap = 40f * k;
-        float previewH = 3f * rowH;
 
         float topH = (28f + 70f + 10f) * k;
         float bottomH = (12f + 34f + 12f + 28f) * k + bh;
         float sectionGap = 16f * k;
-        float maxContent = Mathf.Max(rowH, Screen.height - 32f - topH - bottomH);
+        float maxContent = Mathf.Max(60f * k, Screen.height - 32f - topH - bottomH);
 
-        // two columns: the taller of the left one and the right one
-        float leftH = headH * 3f + (GameRowCount + RadarRowCount) * rowH + previewH;
-        float rightH = headH * 2f + (CrosshairRowCount + ScreenRowCount) * rowH;
-        float twoH = Mathf.Max(leftH, rightH);
+        // two columns: the row height that fits the taller of them (left: 3 headers, the rows, the preview; right: 2 headers)
+        float fitLeft = (maxContent - headH * 3f) / (GameRowCount + RadarRowCount + PreviewRows);
+        float fitRight = (maxContent - headH * 2f) / (CrosshairRowCount + ScreenRowCount);
+        rowH = Mathf.Floor(Mathf.Min(60f * k, fitLeft, fitRight));
 
         float pw = Mathf.Min(1560f * k, Screen.width - 32f);
         float colW = (pw - pad * 2f - colGap) * 0.5f;
-        bool twoColumns = colW >= 560f * k && twoH <= maxContent + 0.5f;
+        bool twoColumns = colW >= 560f * k && rowH >= 50f * k;
         if (!twoColumns)
         {
+            rowH = Mathf.Round(60f * k);
             pw = Mathf.Min(860f * k, Screen.width - 32f);
             pad = Mathf.Min(pad, pw * 0.04f);
         }
+        float previewH = PreviewRows * rowH;
+        float leftH = headH * 3f + (GameRowCount + RadarRowCount) * rowH + previewH;
+        float rightH = headH * 2f + (CrosshairRowCount + ScreenRowCount) * rowH;
+        float twoH = Mathf.Max(leftH, rightH);
 
         // one column: everything under each other
         float contentH = twoColumns
@@ -782,6 +923,8 @@ public class MainMenu : MonoBehaviour
                 status = GameSettings.CanChangeDisplay
                     ? "Экран сменится после «Сохранить», «Назад» отменит изменения"
                     : "В редакторе экран не меняется (только в сборке)";
+            else if (GameSettings.AntiAliasing != snapshot.antiAliasing && !GameSettings.CanChangeAntiAliasing)
+                status = "В редакторе сглаживание не меняется (только в сборке)";
             GUI.Label(new Rect(p.x, y, pw, 34f * k), status, statusStyle);
         }
         y += (34f + 12f) * k;
@@ -815,10 +958,11 @@ public class MainMenu : MonoBehaviour
     }
 
     // the number of rows in each group (the layout of DrawSettings counts on them)
-    const int GameRowCount = 4;        // sensitivity, sensitivity in the zoom, FOV, volume
+    const int GameRowCount = 6;        // sensitivity, sensitivity in the zoom, FOV, volume, agent T, agent CT
     const int RadarRowCount = 3;       // on/off, size, zoom
-    const int ScreenRowCount = 2;      // window mode, resolution
+    const int ScreenRowCount = 4;      // window mode, resolution, anti-aliasing, contrast boost
     const int CrosshairRowCount = 8;
+    const int PreviewRows = 3;         // the crosshair preview is as high as this many rows
 
     float GameRows(float x, float y, float w, ref bool changed)
     {
@@ -846,6 +990,19 @@ public class MainMenu : MonoBehaviour
         float shownVolume = Mathf.Round(GameSettings.MasterVolume * 100f);
         float volume = SliderRow(y, "Общая громкость", shownVolume, 0f, 100f, 5f, 1f, "{0:0}%");
         if (volume != shownVolume) { GameSettings.MasterVolume = volume / 100f; changed = true; }
+        y += rowH;
+
+        // the player's character model on each side ("Авто" = like a bot, by the number in the team); it changes at once
+        RowBack(y, 4);
+        int agents = GameSettings.AgentTNames.Length;
+        int step = CycleRow(y, "Агент за T", GameSettings.AgentName(0), true, TColor);
+        if (step != 0) { GameSettings.AgentT = (GameSettings.AgentT + step + agents) % agents; changed = true; }
+        y += rowH;
+
+        RowBack(y, 5);
+        agents = GameSettings.AgentCTNames.Length;
+        step = CycleRow(y, "Агент за CT", GameSettings.AgentName(1), true, CTColor);
+        if (step != 0) { GameSettings.AgentCT = (GameSettings.AgentCT + step + agents) % agents; changed = true; }
         y += rowH;
 
         return y;
@@ -906,6 +1063,19 @@ public class MainMenu : MonoBehaviour
             GameSettings.ScreenHeight = next.y;
             changed = true;
         }
+        y += rowH;
+
+        // MSAA: works at once in a build (the editor keeps the project's render pipeline asset as it is)
+        RowBack(y, 2);
+        int levels = GameSettings.AntiAliasingNames.Length;
+        step = CycleRow(y, "Сглаживание", GameSettings.AntiAliasingName, false, Color.white);
+        if (step != 0) { GameSettings.AntiAliasing = (GameSettings.AntiAliasing + step + levels) % levels; changed = true; }
+        y += rowH;
+
+        // like the CS2 video setting: the characters stand out from the background far away
+        RowBack(y, 3);
+        bool boost = ToggleRow(y, "Усилить контраст игроков", GameSettings.BoostPlayerContrast, "Вкл — видно издалека", "Выкл");
+        if (boost != GameSettings.BoostPlayerContrast) { GameSettings.BoostPlayerContrast = boost; changed = true; }
         y += rowH;
 
         return y;
@@ -1179,7 +1349,7 @@ public class MainMenu : MonoBehaviour
         {
             GUI.Label(new Rect(r.x + padX, r.y + 10f * k, r.width - padX * 2f, 40f * k), title, style);
             GUI.color = enabled ? Color.white : new Color(1f, 1f, 1f, 0.6f);
-            GUI.Label(new Rect(r.x + padX, r.y + 50f * k, r.width - padX * 2f, 28f * k), hint, hintStyle);
+            GUI.Label(new Rect(r.x + padX, r.y + 50f * k, r.width - padX * 2f, 28f * k), hint, FittingHint(hint, r.width - padX * 2f));
         }
         GUI.color = Color.white;
 
@@ -1251,6 +1421,7 @@ public class MainMenu : MonoBehaviour
         buttonStyle = MakeLabel(30, FontStyle.Bold, TextAnchor.MiddleLeft, Color.white);
         buttonCenterStyle = MakeLabel(28, FontStyle.Bold, TextAnchor.MiddleCenter, Color.white);
         hintStyle = MakeLabel(19, FontStyle.Normal, TextAnchor.MiddleLeft, DimText);
+        hintSmallStyle = MakeLabel(16, FontStyle.Normal, TextAnchor.MiddleLeft, DimText);
         labelStyle = MakeLabel(25, FontStyle.Normal, TextAnchor.MiddleLeft, Color.white);
         labelSmallStyle = MakeLabel(21, FontStyle.Normal, TextAnchor.MiddleLeft, Color.white);
         valueStyle = MakeLabel(25, FontStyle.Bold, TextAnchor.MiddleRight, Color.white);

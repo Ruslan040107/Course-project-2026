@@ -1,0 +1,43 @@
+{
+  "slug": "old_military_crate",
+  "source": "https://polyhaven.com/a/old_military_crate",
+  "license": "CC0",
+  "authors": "Jack Mava",
+  "size": [
+    1.8154,
+    0.3009,
+    0.9791
+  ],
+  "bottomCentre": [
+    0.0053,
+    -0.0,
+    -0.1809
+  ],
+  "tris": 20952,
+  "materials": [
+    {
+      "name": "military_crate_m_01",
+      "baseMap": "old_military_crate_diff_1k.jpg",
+      "normalMap": "old_military_crate_nor_gl_1k.jpg",
+      "maskMap": "old_military_crate_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

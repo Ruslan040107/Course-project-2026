@@ -1,0 +1,43 @@
+{
+  "slug": "painted_wooden_bench",
+  "source": "https://polyhaven.com/a/painted_wooden_bench",
+  "license": "CC0",
+  "authors": "Kirill Sannikov",
+  "size": [
+    1.1649,
+    0.8893,
+    0.4965
+  ],
+  "bottomCentre": [
+    -0.0064,
+    -0.0005,
+    -0.0054
+  ],
+  "tris": 630,
+  "materials": [
+    {
+      "name": "painted_wooden_bench",
+      "baseMap": "painted_wooden_bench_diff_1k.jpg",
+      "normalMap": "painted_wooden_bench_nor_gl_1k.jpg",
+      "maskMap": "painted_wooden_bench_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

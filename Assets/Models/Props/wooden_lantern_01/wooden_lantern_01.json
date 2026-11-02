@@ -1,0 +1,67 @@
+{
+  "slug": "wooden_lantern_01",
+  "source": "https://polyhaven.com/a/wooden_lantern_01",
+  "license": "CC0",
+  "authors": "James Ray Cock",
+  "size": [
+    0.221,
+    0.5301,
+    0.2347
+  ],
+  "bottomCentre": [
+    -0.0,
+    -0.0114,
+    0.0068
+  ],
+  "tris": 8321,
+  "materials": [
+    {
+      "name": "wooden_lantern_01",
+      "baseMap": "wooden_lantern_01_diff_1k.jpg",
+      "normalMap": "wooden_lantern_01_nor_gl_1k.jpg",
+      "maskMap": "wooden_lantern_01_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "wooden_lantern_01_glass",
+      "baseMap": "wooden_lantern_01_glass_diff_1k.jpg",
+      "normalMap": "wooden_lantern_01_glass_nor_gl_1k.jpg",
+      "maskMap": "wooden_lantern_01_glass_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "BLEND",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

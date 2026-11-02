@@ -1,0 +1,67 @@
+{
+  "slug": "outdoor_table_chair_set_01",
+  "source": "https://polyhaven.com/a/outdoor_table_chair_set_01",
+  "license": "CC0",
+  "authors": "James Ray Cock",
+  "size": [
+    0.776,
+    0.8586,
+    1.831
+  ],
+  "bottomCentre": [
+    0.0574,
+    -0.0059,
+    0.0062
+  ],
+  "tris": 9828,
+  "materials": [
+    {
+      "name": "outdoor_table_chair_set_01_chair",
+      "baseMap": "outdoor_table_chair_set_01_chair_diff_1k.jpg",
+      "normalMap": "outdoor_table_chair_set_01_chair_nor_gl_1k.jpg",
+      "maskMap": "outdoor_table_chair_set_01_chair_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "outdoor_table_chair_set_01_table",
+      "baseMap": "outdoor_table_chair_set_01_table_diff_1k.jpg",
+      "normalMap": "outdoor_table_chair_set_01_table_nor_gl_1k.jpg",
+      "maskMap": "outdoor_table_chair_set_01_table_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

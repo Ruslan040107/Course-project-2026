@@ -1,0 +1,67 @@
+{
+  "slug": "hanging_industrial_lamp",
+  "source": "https://polyhaven.com/a/hanging_industrial_lamp",
+  "license": "CC0",
+  "authors": "Kuutti Siitonen",
+  "size": [
+    0.5496,
+    1.3554,
+    0.5496
+  ],
+  "bottomCentre": [
+    -0.0,
+    -1.34,
+    -0.0
+  ],
+  "tris": 9530,
+  "materials": [
+    {
+      "name": "hanging_industrial_lamp",
+      "baseMap": "hanging_industrial_lamp_diff_1k.jpg",
+      "normalMap": "hanging_industrial_lamp_nor_gl_1k.jpg",
+      "maskMap": "hanging_industrial_lamp_ms_1k.png",
+      "emissionMap": "hanging_industrial_lamp_emissive_1k.jpg",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        24.999998092651367,
+        24.999998092651367,
+        24.999998092651367
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "hanging_industrial_lamp_glass",
+      "baseMap": "",
+      "normalMap": "hanging_industrial_lamp_glass_nor_gl_1k.jpg",
+      "maskMap": "",
+      "emissionMap": "",
+      "baseColor": [
+        0.800000011920929,
+        0.800000011920929,
+        0.800000011920929,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 0,
+      "roughness": 0.10000000149011612,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 1,
+      "doubleSided": true
+    }
+  ]
+}

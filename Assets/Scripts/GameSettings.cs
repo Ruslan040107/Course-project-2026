@@ -16,9 +16,10 @@ public enum CrosshairStyle
 // Player settings (saved in PlayerPrefs) and the choice made in the main menu for the next match.
 // Simulations never read these: RoundManager ignores them when it simulates.
 // The settings screen is in MainMenu.cs (Escape → Настройки), GameHud.DrawCrosshairShape draws the crosshair.
-// The match options of the main menu (players per team, static bots) are saved at once by SaveMatchOptions.
+// The match options of the main menu (players per team, static bots, the map) are saved at once by SaveMatchOptions.
 // The screen mode and resolution are put on the window only by Save and at the start of the game (Load),
-// never in batch mode, simulations (-sim), without graphics or in the editor.
+// never in batch mode, simulations (-sim), without graphics or in the editor. The anti-aliasing (MSAA of the render
+// pipeline asset) works at once, but likewise only in a player with a screen.
 public static class GameSettings
 {
     // defaults (also used by "По умолчанию" in the settings screen)
@@ -98,6 +99,27 @@ public static class GameSettings
     public static readonly string[] CrosshairStyleNames =
         { "Классический", "Линии и точка", "Только точка", "Круг и точка", "Крест без зазора", "Т-образный", "Без прицела" };
 
+    // "Boost player contrast" like in CS2: the character models stand out from the background far away
+    // (CharacterContrast; Apply puts it on the shader at once)
+    public const bool DefaultBoostPlayerContrast = true;
+    public static bool BoostPlayerContrast = DefaultBoostPlayerContrast;
+
+    // anti-aliasing: the index of the choice (MSAA samples in AntiAliasingSamples), put on the render pipeline asset in use
+    public const int DefaultAntiAliasing = 2;   // 4x
+    public static int AntiAliasing = DefaultAntiAliasing;
+    public static readonly int[] AntiAliasingSamples = { 1, 2, 4, 8 };
+    // names for the settings screen, in the same order
+    public static readonly string[] AntiAliasingNames = { "Выкл", "2x", "4x", "8x" };
+
+    // the agent (character model) of the player on each side: 0 = auto (like a bot, by the number in the team),
+    // 1 / 2 = the first / second agent of CharacterBody.TAgents / CTAgents; the model changes at once
+    public const int AgentAuto = 0;
+    public static int AgentT = AgentAuto;
+    public static int AgentCT = AgentAuto;
+    // names for the settings screen, in the order of the values
+    public static readonly string[] AgentTNames = { "Авто", "Феникс", "Партизан" };
+    public static readonly string[] AgentCTNames = { "Авто", "SAS", "ФБР" };
+
     // the mode chosen in the main menu for the next scene load; null = the scene's own settings
     public static bool? PendingSolo;
     // players per team chosen in the main menu for the next match (the player counts on his team); null = the scene's value
@@ -110,6 +132,8 @@ public static class GameSettings
     public const int MinTeamSize = 1;
     public const int MaxTeamSize = 10;
     public static int TeamSize;
+    // the scene of the map chosen in the main menu ("" = not chosen yet: the scene the game started in)
+    public static string MenuMap = "";
 
     // true after the main menu was closed once in this run (the menu is not shown again on reload)
     public static bool MenuDone;
@@ -131,6 +155,11 @@ public static class GameSettings
         ZoomSensitivity = DefaultZoomSensitivity;
         BotsFrozen = false;
         TeamSize = 0;
+        MenuMap = "";
+        BoostPlayerContrast = DefaultBoostPlayerContrast;
+        AntiAliasing = DefaultAntiAliasing;
+        AgentT = AgentAuto;
+        AgentCT = AgentAuto;
         Sensitivity = DefaultSensitivity;
         Fov = DefaultFov;
         MasterVolume = DefaultVolume;
@@ -199,8 +228,13 @@ public static class GameSettings
         CrosshairLength = PlayerPrefs.GetFloat("crosshairLength", CrosshairLength);
         CrosshairOutline = PlayerPrefs.GetInt("crosshairOutline", CrosshairOutline ? 1 : 0) == 1;
         CrosshairDynamic = PlayerPrefs.GetInt("crosshairDynamic", CrosshairDynamic ? 1 : 0) == 1;
+        BoostPlayerContrast = PlayerPrefs.GetInt("boostContrast", BoostPlayerContrast ? 1 : 0) == 1;
+        AntiAliasing = PlayerPrefs.GetInt("antiAliasing", AntiAliasing);
+        AgentT = PlayerPrefs.GetInt("agentT", AgentT);
+        AgentCT = PlayerPrefs.GetInt("agentCT", AgentCT);
         BotsFrozen = PlayerPrefs.GetInt("botsFrozen", BotsFrozen ? 1 : 0) == 1;
         TeamSize = PlayerPrefs.GetInt("teamSize", TeamSize);
+        MenuMap = PlayerPrefs.GetString("menuMap", MenuMap);
         LoadDisplay();
         Apply();
     }
@@ -369,12 +403,13 @@ public static class GameSettings
         }
     }
 
-    // the main menu options (team size, static bots): written at once when they change
+    // the main menu options (team size, static bots, the map): written at once when they change
     public static void SaveMatchOptions()
     {
         Clamp();
         PlayerPrefs.SetInt("botsFrozen", BotsFrozen ? 1 : 0);
         PlayerPrefs.SetInt("teamSize", TeamSize);
+        PlayerPrefs.SetString("menuMap", MenuMap ?? "");
         PlayerPrefs.Save();
     }
 
@@ -413,6 +448,10 @@ public static class GameSettings
         PlayerPrefs.SetFloat("crosshairLength", CrosshairLength);
         PlayerPrefs.SetInt("crosshairOutline", CrosshairOutline ? 1 : 0);
         PlayerPrefs.SetInt("crosshairDynamic", CrosshairDynamic ? 1 : 0);
+        PlayerPrefs.SetInt("boostContrast", BoostPlayerContrast ? 1 : 0);
+        PlayerPrefs.SetInt("antiAliasing", AntiAliasing);
+        PlayerPrefs.SetInt("agentT", AgentT);
+        PlayerPrefs.SetInt("agentCT", AgentCT);
         PlayerPrefs.Save();
         Apply();
         ApplyDisplay();
@@ -432,16 +471,46 @@ public static class GameSettings
         CrosshairSize = DefaultCrosshairSize;
         CrosshairColor = DefaultCrosshairColor;
         ResetCrosshairShape();
+        BoostPlayerContrast = DefaultBoostPlayerContrast;
+        AntiAliasing = DefaultAntiAliasing;
+        AgentT = AgentAuto;
+        AgentCT = AgentAuto;
         Apply();
     }
 
-    // pushes the values to the engine and tells the listeners (player controller, camera, HUD, radar);
-    // the screen mode is not touched here (ApplyDisplay, on Save)
+    // pushes the values to the engine and tells the listeners (player controller, camera, HUD, radar, the contrast
+    // shader, MSAA); the screen mode is not touched here (ApplyDisplay, on Save)
     public static void Apply()
     {
         Clamp();
         AudioListener.volume = MasterVolume;
+        CharacterContrast.Enabled = BoostPlayerContrast;
+        if (HasScreen) CharacterContrast.Refresh();
+        ApplyAntiAliasing();
         Changed?.Invoke();
+    }
+
+    // the MSAA can be changed: a player with a screen (in the editor the change would stay in the project's asset)
+    public static bool CanChangeAntiAliasing => CanChangeDisplay;
+
+    public static string AntiAliasingName => AntiAliasingNames[Mathf.Clamp(AntiAliasing, 0, AntiAliasingNames.Length - 1)];
+
+    public static string AgentName(int team)
+    {
+        string[] names = team == 1 ? AgentCTNames : AgentTNames;
+        int i = team == 1 ? AgentCT : AgentT;
+        return names[Mathf.Clamp(i, 0, names.Length - 1)];
+    }
+
+    // MSAA samples of the render pipeline asset in use (Standalone: Assets/Settings/PC_RPAsset, saved with MSAA off),
+    // only in a player with a screen: batch runs and simulations draw nothing, the editor must keep the asset as it is
+    static void ApplyAntiAliasing()
+    {
+        if (!CanChangeAntiAliasing) return;
+        UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset urp =
+            UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline as UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset;
+        int samples = AntiAliasingSamples[Mathf.Clamp(AntiAliasing, 0, AntiAliasingSamples.Length - 1)];
+        if (urp != null && urp.msaaSampleCount != samples) urp.msaaSampleCount = samples;
     }
 
     // keeps broken or old saved values inside the allowed ranges
@@ -478,5 +547,9 @@ public static class GameSettings
         CrosshairGap = Mathf.Clamp(CrosshairGap, MinCrosshairGap, MaxCrosshairGap);
         CrosshairThickness = Mathf.Clamp(CrosshairThickness, MinCrosshairThickness, MaxCrosshairThickness);
         CrosshairLength = Mathf.Clamp(CrosshairLength, MinCrosshairLength, MaxCrosshairLength);
+        AntiAliasing = Mathf.Clamp(AntiAliasing, 0, AntiAliasingSamples.Length - 1);
+        if (AgentT < 0 || AgentT >= AgentTNames.Length) AgentT = AgentAuto;
+        if (AgentCT < 0 || AgentCT >= AgentCTNames.Length) AgentCT = AgentAuto;
+        if (MenuMap == null) MenuMap = "";
     }
 }

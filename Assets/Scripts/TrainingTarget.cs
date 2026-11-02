@@ -2,7 +2,8 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // Immortal target dummy for solo test mode: shows every hit and some stats.
-// With graphics it is a static CT_Swat model in its idle pose (no movement) instead of the capsule, the root turned
+// With graphics it is a static model of the first CT agent (CT_SAS; CT_Swat while that is not in the project) in its
+// idle pose (no movement) instead of the capsule, with "Boost player contrast" like the bots, the root turned
 // once to face the player and the pose straightened to it (CharacterBody.StraightenPose: hips, chest and head face
 // the root's forward), with the same bone hitboxes as the bots (CharacterBody.AddHitboxes): the panel shows the
 // body part of every hit (head, chest and arms, stomach, legs) and counts the hits per part. The capsule then goes to the Ignore Raycast layer,
@@ -16,10 +17,14 @@ public class TrainingTarget : MonoBehaviour
     public KeyCode resetKey = KeyCode.T;
 
     [Header("Model")]
-    [Tooltip("Resources path of the model, empty = keep the capsule")] public string modelPath = CharacterBody.CTModel;
+    [Tooltip("Resources path of the model, empty = keep the capsule (the old default CT_Swat means the first CT agent)")]
+    public string modelPath = DefaultModel;
     [Tooltip("the clip of the pose and the moment of it (0..1)")] public string poseClip = "Idle";
     [Range(0f, 1f)] public float poseTime = 0f;
     [Tooltip("the model turns to the player once, at the start")] public bool facePlayer = true;
+
+    // the first CT agent (CharacterBody.LoadModel falls back to CT_Swat while it is not in the project)
+    public const string DefaultModel = "Characters/CT_SAS";
 
     struct Popup
     {
@@ -95,7 +100,9 @@ public class TrainingTarget : MonoBehaviour
     void BuildModel()
     {
         if (!CharacterBody.VisualsAllowed() || string.IsNullOrEmpty(modelPath)) return;
-        GameObject prefab = Resources.Load<GameObject>(modelPath);
+        // CT_Swat was the default before the agents: the scenes saved then (the desert) keep it in their field
+        string path = modelPath == CharacterBody.CTFallback ? DefaultModel : modelPath;
+        GameObject prefab = CharacterBody.LoadModel(path);
         if (prefab == null) return;
 
         model = CharacterBody.SpawnModel(prefab, transform);

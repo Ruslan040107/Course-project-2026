@@ -1,0 +1,43 @@
+{
+  "slug": "propane_tank",
+  "source": "https://polyhaven.com/a/propane_tank",
+  "license": "CC0",
+  "authors": "Slinc",
+  "size": [
+    0.3374,
+    0.5538,
+    0.3374
+  ],
+  "bottomCentre": [
+    -0.0,
+    0.0,
+    -0.0
+  ],
+  "tris": 5238,
+  "materials": [
+    {
+      "name": "propane_tank",
+      "baseMap": "propane_tank_diff_1k.jpg",
+      "normalMap": "propane_tank_nor_gl_1k.jpg",
+      "maskMap": "propane_tank_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": false
+    }
+  ]
+}

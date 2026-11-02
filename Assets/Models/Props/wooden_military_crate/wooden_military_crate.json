@@ -1,0 +1,43 @@
+{
+  "slug": "wooden_military_crate",
+  "source": "https://polyhaven.com/a/wooden_military_crate",
+  "license": "CC0",
+  "authors": "Prabhjinder Singh",
+  "size": [
+    1.2421,
+    0.4648,
+    0.5198
+  ],
+  "bottomCentre": [
+    -0.0,
+    0.0,
+    -0.0
+  ],
+  "tris": 22986,
+  "materials": [
+    {
+      "name": "wooden_military_crate",
+      "baseMap": "wooden_military_crate_diff_1k.jpg",
+      "normalMap": "wooden_military_crate_nor_gl_1k.jpg",
+      "maskMap": "wooden_military_crate_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

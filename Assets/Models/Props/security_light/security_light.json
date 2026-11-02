@@ -1,0 +1,91 @@
+{
+  "slug": "security_light",
+  "source": "https://polyhaven.com/a/security_light",
+  "license": "CC0",
+  "authors": "Maximilian Schuster",
+  "size": [
+    0.3231,
+    0.531,
+    0.4172
+  ],
+  "bottomCentre": [
+    0.0004,
+    -0.3593,
+    0.1774
+  ],
+  "tris": 4668,
+  "materials": [
+    {
+      "name": "security_light",
+      "baseMap": "security_light_diff_1k.jpg",
+      "normalMap": "security_light_nor_gl_1k.jpg",
+      "maskMap": "security_light_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "security_light_bulb",
+      "baseMap": "security_light_diff_1k.jpg",
+      "normalMap": "security_light_nor_gl_1k.jpg",
+      "maskMap": "security_light_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "security_light_glass",
+      "baseMap": "security_light_diff_1k.jpg",
+      "normalMap": "security_light_nor_gl_1k.jpg",
+      "maskMap": "security_light_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "BLEND",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

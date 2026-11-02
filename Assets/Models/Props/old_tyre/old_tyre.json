@@ -1,0 +1,43 @@
+{
+  "slug": "old_tyre",
+  "source": "https://polyhaven.com/a/old_tyre",
+  "license": "CC0",
+  "authors": "MP",
+  "size": [
+    0.6,
+    0.6,
+    0.165
+  ],
+  "bottomCentre": [
+    -0.0,
+    -0.3,
+    -0.0003
+  ],
+  "tris": 2880,
+  "materials": [
+    {
+      "name": "old_tyre",
+      "baseMap": "old_tyre_diff_1k.jpg",
+      "normalMap": "old_tyre_nor_gl_1k.jpg",
+      "maskMap": "old_tyre_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

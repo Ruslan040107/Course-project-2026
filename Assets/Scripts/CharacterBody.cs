@@ -4,8 +4,13 @@ using UnityEngine.AI;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
-// Character models with animations instead of the capsules (Quaternius Ultimate Modular Men, CC0):
-// Terrorists (team 0) are Resources/Characters/T_Adventurer, Counter-Terrorists (team 1) CT_Swat.
+// Character models with animations instead of the capsules (built from Quaternius Ultimate Modular Men, CC0):
+// two agents per team like in CS, Terrorists (team 0) Resources/Characters/T_Phoenix and T_Guerrilla,
+// Counter-Terrorists (team 1) CT_SAS and CT_FBI (an agent that is not in the project falls back to the first models,
+// T_Adventurer / CT_Swat). Bots alternate by their number in the team (T_1, T_3 .. the first agent, T_2, T_4 .. the
+// second), so a team is mixed; the player gets the agent chosen in the settings for the side he plays
+// (GameSettings.AgentT / AgentCT, "Авто" = like a bot, the player counting as number 0), a new choice shows at once.
+// - Every model gets "Boost player contrast" (CharacterContrast, GameSettings.BoostPlayerContrast).
 // - The capsule and the other own renderers of the bot or player are hidden (forceRenderingOff).
 // - The model is a child with its feet on the floor. It faces where the character aims (the player: his view),
 //   and a bot without a target faces where it runs, so it never runs sideways by mistake.
@@ -25,13 +30,15 @@ using UnityEngine.SceneManagement;
 //   comes forward, the stock rests at the right shoulder) or also on the grip (pistols, arms forward). Both arms use an
 //   analytic two-bone IK (UpperArm/LowerArm/Wrist); the gun slides back along the aim when a hand cannot reach. While
 //   reloading the left hand goes to the magazine. The knife stays in the right fist of the animation.
-// - Halftime (Health.team changed): the model of the new team is built again, with hitboxes, gun mount and layers.
+// - Halftime (Health.team changed): the model of the new team is built again, with hitboxes, gun mount and layers;
+//   the character keeps its agent number (the first agent of one side becomes the first agent of the other).
 // - WeaponMount: an empty object in the right fist where BotWeaponModels hangs the gun (grip in the fist, barrel
 //   forward). The IK puts the right wrist so that the mount is exactly where the gun should be.
 // - Crouch (bots: BotController.CrouchAmount, the player: his crouch key): a procedural pose on top of the clip,
 //   hips 0.45 m down, spine forward, knees bent by a leg IK to the feet of the clip (Walk when moving).
 // - Hitboxes: colliders with HitZone on the bones (head sphere, chest/upper body/stomach/pelvis boxes, arm, hand and
-//   leg capsules, feet boxes), sized to the meshes (measured in Blender), so they follow the animation and the crouch.
+//   leg capsules, feet boxes), one table for every model, sized to the models with their gear (like CS2: a helmet is
+//   head, a plate carrier chest and stomach), so they follow the animation and the crouch.
 //   The capsule / CharacterController goes to the Ignore Raycast layer: bullets and vision hit only the hitboxes.
 //   A bot's eyes (BotController.head: vision and shots) follow the head of its model.
 // - The model of the character the main camera is in (the living player, a watched bot) is on layer 9 "LocalBody"
@@ -87,8 +94,12 @@ public class CharacterBody : MonoBehaviour
     public float crossFade = 0.2f;
     [Range(0f, 1f)] public float hitWeight = 0.7f;
 
-    public const string TModel = "Characters/T_Adventurer";
-    public const string CTModel = "Characters/CT_Swat";
+    // the agents of each side (Resources paths), the index is the agent number of a character
+    public static readonly string[] TAgents = { "Characters/T_Phoenix", "Characters/T_Guerrilla" };
+    public static readonly string[] CTAgents = { "Characters/CT_SAS", "Characters/CT_FBI" };
+    // the first models: what a missing agent falls back to
+    public const string TFallback = "Characters/T_Adventurer";
+    public const string CTFallback = "Characters/CT_Swat";
     public const float ModelHeight = 1.81f;
 
     // layer 9 "LocalBody" (used by number, it needs no name in the tag manager): the model of the character the
@@ -152,6 +163,8 @@ public class CharacterBody : MonoBehaviour
     Quaternion chestRest = Quaternion.identity, hipsRest = Quaternion.identity, headRest = Quaternion.identity;
     float scaleK = 1f;                           // the model's size compared with the Blender measurements
     int builtTeam = -1;                          // the team the model was made for
+    int agentNumber = -1;                        // the agent number (TAgents / CTAgents), kept when the team changes
+    int builtAgent = -1;                         // the agent the model was made for
 
     // animation states
     string idle, idleKnife, run, runBack, runLeft, runRight, walk, current;
@@ -239,6 +252,8 @@ public class CharacterBody : MonoBehaviour
         fits.Clear();
         loggedFix.Clear();
         opaqueCopies.Clear();
+        missing.Clear();
+        unnumbered = 0;
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -310,9 +325,34 @@ public class CharacterBody : MonoBehaviour
 
     // ---------------- models (also used by Corpses and TrainingTarget) ----------------
 
-    public static GameObject PrefabFor(int team)
+    // the model of an agent of a side (the number wraps around)
+    public static GameObject PrefabFor(int team, int agentNumber)
     {
-        return Resources.Load<GameObject>(team == 1 ? CTModel : TModel);
+        string[] agents = team == 1 ? CTAgents : TAgents;
+        return LoadModel(agents[(agentNumber % agents.Length + agents.Length) % agents.Length]);
+    }
+
+    static readonly HashSet<string> missing = new HashSet<string>();
+
+    // a model by its Resources path; an agent that is not in the project falls back to the first model of its side
+    // (written to the log once)
+    public static GameObject LoadModel(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        GameObject prefab = Resources.Load<GameObject>(path);
+        if (prefab != null) return prefab;
+
+        string fallback = System.Array.IndexOf(CTAgents, path) >= 0 ? CTFallback
+            : System.Array.IndexOf(TAgents, path) >= 0 ? TFallback : null;
+        if (fallback == null) return null;
+        if (missing.Add(path)) Debug.Log("CharacterBody: no " + path + " in Resources, using " + fallback);
+        return Resources.Load<GameObject>(fallback);
+    }
+
+    // the side a model belongs to by its name: CT_... = 1, everything else 0
+    public static int TeamOf(GameObject prefab)
+    {
+        return prefab != null && prefab.name.StartsWith("CT", System.StringComparison.Ordinal) ? 1 : 0;
     }
 
     // where an instance sits under a parent of scale 1: feet at y 0, facing +Z, about 1.81 m tall
@@ -335,6 +375,8 @@ public class CharacterBody : MonoBehaviour
 
         foreach (Collider c in go.GetComponentsInChildren<Collider>(true)) Destroy(c);
         FixMaterials(go);
+        // "Boost player contrast": copies of the materials with the contrast shader (the old models: with their palette)
+        CharacterContrast.Apply(go, TeamOf(prefab), CharacterContrast.UsesPalette(prefab));
 
         if (!fits.TryGetValue(prefab, out Fit fit))
         {
@@ -692,10 +734,24 @@ public class CharacterBody : MonoBehaviour
 
     enum Shape { Sphere, Box, Capsule }
 
-    // Measured in Blender on the rest pose of CT_Swat and T_Adventurer (scratchpad hitbox_rest.py), the average of the
-    // two models so both teams have the same hitboxes. Spine and head: offsets from the bone's head in its frame
-    // (right, up = towards the next bone, forward = the character's forward). Limbs: capsules along the bone,
-    // centre and height along it, radius. Feet: in the character's frame.
+    // One table for every model (all of them share the rig), so both teams have the same hitboxes. Like in CS2 the gear
+    // counts: a helmet is head, a plate carrier or chest rig is chest and stomach. The sizes cover the gear envelope
+    // agreed for the agents, in the Blender rest pose (m, Z up, the character faces -Y, the spine line is at y -0.04):
+    // torso gear from y -0.245 (front) to +0.115 (back) and |x| <= 0.175 for z 1.05-1.42 (straps on the shoulders up to
+    // |x| 0.20), belt gear |x| <= 0.19, y -0.20..+0.12, z 0.95-1.08, head gear inside the ellipsoid around
+    // (0, -0.05, 1.715) with half axes (0.14, 0.15, 0.145), limb gear at most 2.5 cm on the cloth. The limbs are the
+    // largest cloth radius of the pack's outfits plus about 1.5 cm, the capsules overlap the knees and elbows.
+    // The regions were turned into the bone frames of the rest pose and checked on the meshes in Blender, vertices more
+    // than 1 cm outside every hitbox (the old, smaller table in brackets): CT_Swat head 3.8 % (37 %, its respirator),
+    // torso 0 % (5 %), arms 0 % (18 %), legs 3.4 % (19 %); the four agents: torso 0-0.4 %, arms 0 %, legs 1.9-3.2 %,
+    // head 1.6-3.8 % (CT_FBI 7 %: the NVG mount and rails of its helmet, up to 5 cm out). The backpack of T_Guerrilla
+    // and T_Adventurer (torso 20 % / 40 %) is outside the envelope and is no hitbox, like in CS2. In the game (AutoShot
+    // test "agents": a ray through every second drawn pixel of a standing or running agent, front and side) about 1-2 %
+    // of a model's pixels miss every hitbox, mostly the toe tips and the fingers of the left hand (T_Guerrilla seen from
+    // the side 7.7 %: the backpack).
+    // Spine and head: offsets from the bone's head in its frame (right, up = towards the next bone, forward = the
+    // character's forward). Limbs: capsules along the bone, centre and height along it (caps included), radius.
+    // Feet: in the character's frame.
     struct Spec
     {
         public string name, bone, toward;
@@ -712,26 +768,28 @@ public class CharacterBody : MonoBehaviour
 
     static readonly Spec[] Specs =
     {
-        S("Head", "Head", null, Shape.Sphere, BodyZone.Head, new Vector3(0f, 0.107f, 0.009f), new Vector3(0.125f, 0f, 0f)),
-        S("Chest", "Chest", "Neck", Shape.Box, BodyZone.Body, new Vector3(0f, 0.0925f, 0.013f), new Vector3(0.294f, 0.195f, 0.206f)),
-        S("UpperBody", "Torso", "Chest", Shape.Box, BodyZone.Body, new Vector3(0f, 0.108f, 0.028f), new Vector3(0.252f, 0.22f, 0.226f)),
-        S("Stomach", "Abdomen", "Torso", Shape.Box, BodyZone.Stomach, new Vector3(0f, 0.081f, 0.036f), new Vector3(0.252f, 0.17f, 0.202f)),
-        S("Pelvis", "Hips", "Abdomen", Shape.Box, BodyZone.Stomach, new Vector3(0f, 0.073f, 0.001f), new Vector3(0.208f, 0.194f, 0.227f)),
-        S("UpperArm.L", "UpperArm.L", "LowerArm.L", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.072f, 0f), new Vector3(0.08f, 0.22f, 0f)),
-        S("UpperArm.R", "UpperArm.R", "LowerArm.R", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.072f, 0f), new Vector3(0.08f, 0.22f, 0f)),
-        S("LowerArm.L", "LowerArm.L", "Wrist.L", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.131f, 0f), new Vector3(0.052f, 0.246f, 0f)),
-        S("LowerArm.R", "LowerArm.R", "Wrist.R", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.131f, 0f), new Vector3(0.052f, 0.246f, 0f)),
-        S("Hand.L", "Wrist.L", "Middle1.L", Shape.Sphere, BodyZone.Body, new Vector3(0f, 0.10f, 0f), new Vector3(0.06f, 0f, 0f)),
-        S("Hand.R", "Wrist.R", "Middle1.R", Shape.Sphere, BodyZone.Body, new Vector3(0f, 0.10f, 0f), new Vector3(0.06f, 0f, 0f)),
-        S("UpperLeg.L", "UpperLeg.L", "LowerLeg.L", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.175f, 0f), new Vector3(0.10f, 0.49f, 0f)),
-        S("UpperLeg.R", "UpperLeg.R", "LowerLeg.R", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.175f, 0f), new Vector3(0.10f, 0.49f, 0f)),
-        S("LowerLeg.L", "LowerLeg.L", "Foot.L", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.27f, 0f), new Vector3(0.078f, 0.50f, 0f)),
-        S("LowerLeg.R", "LowerLeg.R", "Foot.R", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.27f, 0f), new Vector3(0.078f, 0.50f, 0f)),
-        S("Foot.L", "Foot.L", null, Shape.Box, BodyZone.Legs, new Vector3(-0.0134f, 0.015f, 0.103f), new Vector3(0.105f, 0.08f, 0.226f)),
-        S("Foot.R", "Foot.R", null, Shape.Box, BodyZone.Legs, new Vector3(0.0134f, 0.015f, 0.103f), new Vector3(0.105f, 0.08f, 0.226f)),
+        S("Head", "Head", null, Shape.Sphere, BodyZone.Head, new Vector3(0f, 0.123f, 0.012f), new Vector3(0.15f, 0f, 0f)),
+        S("Chest", "Chest", "Neck", Shape.Box, BodyZone.Body, new Vector3(0f, 0.094f, 0.003f), new Vector3(0.35f, 0.198f, 0.324f)),
+        S("UpperBody", "Torso", "Chest", Shape.Box, BodyZone.Body, new Vector3(0f, 0.102f, 0.026f), new Vector3(0.35f, 0.329f, 0.364f)),
+        S("Stomach", "Abdomen", "Torso", Shape.Box, BodyZone.Stomach, new Vector3(0f, 0.07f, 0.02f), new Vector3(0.38f, 0.206f, 0.373f)),
+        S("Pelvis", "Hips", "Abdomen", Shape.Box, BodyZone.Stomach, new Vector3(0f, 0.073f, -0.01f), new Vector3(0.38f, 0.232f, 0.343f)),
+        S("UpperArm.L", "UpperArm.L", "LowerArm.L", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.065f, 0f), new Vector3(0.09f, 0.27f, 0f)),
+        S("UpperArm.R", "UpperArm.R", "LowerArm.R", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.065f, 0f), new Vector3(0.09f, 0.27f, 0f)),
+        S("LowerArm.L", "LowerArm.L", "Wrist.L", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.12f, 0f), new Vector3(0.072f, 0.3f, 0f)),
+        S("LowerArm.R", "LowerArm.R", "Wrist.R", Shape.Capsule, BodyZone.Body, new Vector3(0f, 0.12f, 0f), new Vector3(0.072f, 0.3f, 0f)),
+        S("Hand.L", "Wrist.L", "Middle1.L", Shape.Sphere, BodyZone.Body, new Vector3(0f, 0.10f, 0f), new Vector3(0.075f, 0f, 0f)),
+        S("Hand.R", "Wrist.R", "Middle1.R", Shape.Sphere, BodyZone.Body, new Vector3(0f, 0.10f, 0f), new Vector3(0.075f, 0f, 0f)),
+        S("UpperLeg.L", "UpperLeg.L", "LowerLeg.L", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.185f, 0f), new Vector3(0.125f, 0.57f, 0f)),
+        S("UpperLeg.R", "UpperLeg.R", "LowerLeg.R", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.185f, 0f), new Vector3(0.125f, 0.57f, 0f)),
+        S("LowerLeg.L", "LowerLeg.L", "Foot.L", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.245f, 0f), new Vector3(0.10f, 0.57f, 0f)),
+        S("LowerLeg.R", "LowerLeg.R", "Foot.R", Shape.Capsule, BodyZone.Legs, new Vector3(0f, 0.245f, 0f), new Vector3(0.10f, 0.57f, 0f)),
+        S("Foot.L", "Foot.L", null, Shape.Box, BodyZone.Legs, new Vector3(-0.0134f, 0.008f, 0.112f), new Vector3(0.12f, 0.095f, 0.26f)),
+        S("Foot.R", "Foot.R", null, Shape.Box, BodyZone.Legs, new Vector3(0.0134f, 0.008f, 0.112f), new Vector3(0.12f, 0.095f, 0.26f)),
     };
 
-    const float BlenderHipsToHead = 0.6934f;   // rest distance Hips -> Head of both models in Blender, m
+    const float BlenderHipsToHead = 0.6934f;   // rest distance Hips -> Head of the rig in Blender, m
+    // a bot's eyes are this far under the centre of its head hitbox (where they were before the head sphere grew), m
+    const float EyesUnderHeadCentre = 0.056f;
 
     // Adds the hitboxes to the bones of a character model (children of the bones, so they follow the animation).
     // facing: the character's rotation (feet down, looking forward). Works in any current pose (uses the rest pose).
@@ -865,7 +923,7 @@ public class CharacterBody : MonoBehaviour
     // the top of the head (crouching included), for the names over teammates
     public Vector3 HeadTop()
     {
-        if (HasModel && hbHead != null) return hbHead.transform.position + Vector3.up * 0.13f;
+        if (HasModel && hbHead != null) return hbHead.transform.position + Vector3.up * (0.155f * scaleK);
         if (HasModel && headBone != null) return headBone.position + Vector3.up * 0.25f;
         Collider c = GetComponent<Collider>();
         return c != null ? new Vector3(c.bounds.center.x, c.bounds.max.y, c.bounds.center.z) : transform.position + Vector3.up;
@@ -896,10 +954,12 @@ public class CharacterBody : MonoBehaviour
         if (!Build()) enabled = false;
     }
 
-    // the model of the character's team with its animation, bones, hitboxes and gun mount; false when there is none
+    // the model of the character's agent with its animation, bones, hitboxes and gun mount; false when there is none
     bool Build()
     {
-        prefab = health != null ? PrefabFor(health.team) : null;
+        if (health == null) return false;
+        builtAgent = WantedAgent();
+        prefab = PrefabFor(health.team, builtAgent);
         if (prefab == null) return false;
 
         GameObject go = SpawnModel(prefab, transform);
@@ -984,7 +1044,38 @@ public class CharacterBody : MonoBehaviour
         return true;
     }
 
-    // the team changed (halftime, T <-> CT): the model of the new team replaces the old one
+    // The agent number: a bot's comes from its number in the team (the name T_3 / CT_3, given before the first model;
+    // a halftime renames the bots, the number stays), so the agents alternate within a team. The player plays the
+    // agent chosen for his side; "Авто" = like a bot, the player counting as number 0 (the second agent).
+    int WantedAgent()
+    {
+        if (agentNumber < 0)
+        {
+            int number = player != null ? 0 : NumberIn(gameObject.name);
+            if (number < 0) number = ++unnumbered;
+            agentNumber = ((number - 1) % AgentCount + AgentCount) % AgentCount;
+        }
+        if (player != null && health != null)
+        {
+            int chosen = health.team == 1 ? GameSettings.AgentCT : health.team == 0 ? GameSettings.AgentT : 0;
+            if (chosen > 0) return (chosen - 1) % AgentCount;
+        }
+        return agentNumber;
+    }
+
+    const int AgentCount = 2;
+    static int unnumbered;   // characters without a number in the name get 1, 2, 3 ... in the order they are built
+
+    // the number at the end of a name ("CT_12" -> 12), -1 if there is none
+    static int NumberIn(string name)
+    {
+        int i = name.Length;
+        while (i > 0 && char.IsDigit(name[i - 1])) i--;
+        if (i == name.Length || name.Length - i > 6) return -1;
+        return int.Parse(name.Substring(i), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    // the team changed (halftime, T <-> CT) or the player chose another agent: the new model replaces the old one
     void Rebuild()
     {
         Teardown();
@@ -1320,8 +1411,9 @@ public class CharacterBody : MonoBehaviour
         }
         if (model == null) return;
 
-        // halftime swapped the teams (RoundManager.Halftime, or the team was changed some other way)
-        if (health != null && health.team != builtTeam)
+        // halftime swapped the teams (RoundManager.Halftime, or the team was changed some other way), or the player
+        // chose another agent in the settings
+        if (health != null && (health.team != builtTeam || (player != null && WantedAgent() != builtAgent)))
         {
             Rebuild();
             if (model == null) return;
@@ -1532,7 +1624,7 @@ public class CharacterBody : MonoBehaviour
         // a bot sees and shoots from its visible head (it follows the crouch and the run), so its eyes are always
         // inside its own head hitbox; the rotation stays BotController's
         if (bot != null && bot.head != null && hbHead != null)
-            bot.head.position = hbHead.transform.position - Vector3.up * 0.04f;
+            bot.head.position = hbHead.transform.position - Vector3.up * EyesUnderHeadCentre;
 
         // the hitboxes moved with the bones: bullets and vision of the next frame see the pose that is drawn
         if (hitboxes.Count > 0) Physics.SyncTransforms();

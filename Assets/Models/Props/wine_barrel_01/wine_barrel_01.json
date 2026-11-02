@@ -1,0 +1,43 @@
+{
+  "slug": "wine_barrel_01",
+  "source": "https://polyhaven.com/a/wine_barrel_01",
+  "license": "CC0",
+  "authors": "James Ray Cock",
+  "size": [
+    0.7419,
+    0.8713,
+    0.756
+  ],
+  "bottomCentre": [
+    -0.0,
+    0.0007,
+    0.0071
+  ],
+  "tris": 10820,
+  "materials": [
+    {
+      "name": "wine_barrel_01",
+      "baseMap": "wine_barrel_01_diff_1k.jpg",
+      "normalMap": "wine_barrel_01_nor_gl_1k.jpg",
+      "maskMap": "wine_barrel_01_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "slug": "portable_generator",
+  "source": "https://polyhaven.com/a/portable_generator",
+  "license": "CC0",
+  "authors": "James Ray Cock",
+  "size": [
+    0.8183,
+    0.5769,
+    0.564
+  ],
+  "bottomCentre": [
+    0.0053,
+    0.0001,
+    -0.0
+  ],
+  "tris": 26419,
+  "materials": [
+    {
+      "name": "portable_generator",
+      "baseMap": "portable_generator_diff_1k.jpg",
+      "normalMap": "portable_generator_nor_gl_1k.jpg",
+      "maskMap": "portable_generator_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "portable_generator_glass",
+      "baseMap": "portable_generator_diff_1k.jpg",
+      "normalMap": "portable_generator_nor_gl_1k.jpg",
+      "maskMap": "portable_generator_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "BLEND",
+      "alphaCutoff": 0.5,
+      "transmission": 1,
+      "doubleSided": true
+    }
+  ]
+}

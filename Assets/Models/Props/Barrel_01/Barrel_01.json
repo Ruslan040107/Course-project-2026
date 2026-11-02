@@ -1,0 +1,43 @@
+{
+  "slug": "Barrel_01",
+  "source": "https://polyhaven.com/a/Barrel_01",
+  "license": "CC0",
+  "authors": "Jorge Camacho",
+  "size": [
+    0.563,
+    0.88,
+    0.563
+  ],
+  "bottomCentre": [
+    0.0,
+    -0.0066,
+    0.0
+  ],
+  "tris": 2682,
+  "materials": [
+    {
+      "name": "Barrel_01",
+      "baseMap": "Barrel_01_explosive_diff_1k.jpg",
+      "normalMap": "Barrel_01_explosive_nor_gl_1k.jpg",
+      "maskMap": "Barrel_01_explosive_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

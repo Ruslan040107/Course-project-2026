@@ -1,0 +1,43 @@
+{
+  "slug": "planter_pot_clay",
+  "source": "https://polyhaven.com/a/planter_pot_clay",
+  "license": "CC0",
+  "authors": "Amal Kumar",
+  "size": [
+    0.266,
+    0.2219,
+    0.2635
+  ],
+  "bottomCentre": [
+    0.001,
+    0.0004,
+    0.0114
+  ],
+  "tris": 3080,
+  "materials": [
+    {
+      "name": "planter_pot_clay",
+      "baseMap": "planter_pot_clay_diff_1k.jpg",
+      "normalMap": "planter_pot_clay_nor_gl_1k.jpg",
+      "maskMap": "planter_pot_clay_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

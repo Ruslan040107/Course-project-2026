@@ -1,0 +1,67 @@
+{
+  "slug": "modular_industrial_pipes_01",
+  "source": "https://polyhaven.com/a/modular_industrial_pipes_01",
+  "license": "CC0",
+  "authors": "Jorge Camacho",
+  "size": [
+    1.4028,
+    1.9546,
+    0.3076
+  ],
+  "bottomCentre": [
+    0.0022,
+    -1.0023,
+    0.0256
+  ],
+  "tris": 12340,
+  "materials": [
+    {
+      "name": "modular_industrial_pipes_01_group01",
+      "baseMap": "modular_industrial_pipes_01_group01_diff_1k.jpg",
+      "normalMap": "modular_industrial_pipes_01_group01_nor_gl_1k.jpg",
+      "maskMap": "modular_industrial_pipes_01_group01_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "modular_industrial_pipes_01_group02",
+      "baseMap": "modular_industrial_pipes_01_group02_diff_1k.jpg",
+      "normalMap": "modular_industrial_pipes_01_group02_nor_gl_1k.jpg",
+      "maskMap": "modular_industrial_pipes_01_group02_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

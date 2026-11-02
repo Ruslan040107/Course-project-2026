@@ -2036,6 +2036,13 @@ MonoBehaviour:
   magazineSize: 30
   reserveAmmo: 90
   reloadTime: 2.2
+  standInaccuracy: 0.3
+  crouchInaccuracy: 0.22
+  moveInaccuracy: 5
+  inaccuracyPerShot: 0.4
+  recoveryTime: 0.4
+  recoilPattern: 2
+  recoilScale: 3
   botSpreadMultiplier: 2
   moveSpeedFactor: 1
   firingMoveSpeedFactor: 0
@@ -4549,6 +4556,13 @@ MonoBehaviour:
   decalPool: 80
   decalLifetime: 25
   decalFadeTime: 4
+  scratchPool: 30
+  scratchLifetime: 20
+  scratchFadeTime: 4
+  pieceLimit: 48
+  pieceLieTime: 1
+  pieceShrinkTime: 0.25
+  pieceMaxDistance: 40
   headshotIcon: {fileID: 2800000, guid: ad78b139607381b47b5cf075577f75ee, type: 3}
   noScopeIcon: {fileID: 2800000, guid: 390325ec540e2034aab11efb04c87978, type: 3}
   jumpIcon: {fileID: 2800000, guid: 17ed0aa81c476244fa877e0d8eb878ed, type: 3}
@@ -9174,7 +9188,13 @@ MonoBehaviour:
   botsPerTeam: 1
   roundTime: 60
   breakTime: 3
-  roundsToWin: 5
+  maxRounds: 30
+  freezeTime: 3
+  halftimeSwitch: 1
+  halftimeAfterRound: 0
+  buyZoneMargin: 4.5
+  minBuyZoneSize: 10
+  botsFrozen: 0
   simulation: 0
   simTimeScale: 10
   roundsToSimulate: 300
@@ -9721,23 +9741,16 @@ MonoBehaviour:
   crouchCameraY: 0.05
   sneakKey: 304
   sneakSpeedFactor: 0.5
-  crouchSpread: 0.4
-  sneakSpread: 0.6
-  standSpread: 0.8
-  runSpread: 1
-  airSpread: 2
-  spreadChangeSpeed: 6
   bobFrequency: 9
   bobHeight: 0.04
   bobSide: 0.025
   bobSmoothing: 10
-  recoilUp: 0.6
-  recoilSide: 0.25
-  recoilRoll: 0.5
-  recoilMax: 5
-  recoilRecoveryDelay: 0.15
-  recoilReturnSpeed: 9
-  sprayResetTime: 0.35
+  viewPunchScale: 0.5
+  viewPunchFollow: 25
+  viewKick: 0.15
+  viewKickReturn: 20
+  noclipSpeed: 8
+  noclipFastFactor: 3
 --- !u!114 &1913474541
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9785,6 +9798,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Spectator
   cam: {fileID: 330585546}
   crosshair: {fileID: 242573186}
+  aimFollow: 18
 --- !u!114 &1913474544
 MonoBehaviour:
   m_ObjectHideFlags: 0

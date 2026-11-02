@@ -1,0 +1,43 @@
+{
+  "slug": "ocean_buoy",
+  "source": "https://polyhaven.com/a/ocean_buoy",
+  "license": "CC0",
+  "authors": "Mateusz Sadek",
+  "size": [
+    1.0666,
+    2.6562,
+    0.9521
+  ],
+  "bottomCentre": [
+    -0.0572,
+    -0.8094,
+    -0.0
+  ],
+  "tris": 12240,
+  "materials": [
+    {
+      "name": "buoy",
+      "baseMap": "ocean_buoy_diff_1k.jpg",
+      "normalMap": "ocean_buoy_nor_gl_1k.jpg",
+      "maskMap": "ocean_buoy_ms_1k.png",
+      "emissionMap": "ocean_buoy_emission_1k.jpg",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        10,
+        10,
+        10
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

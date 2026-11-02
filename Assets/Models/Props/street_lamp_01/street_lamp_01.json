@@ -1,0 +1,91 @@
+{
+  "slug": "street_lamp_01",
+  "source": "https://polyhaven.com/a/street_lamp_01",
+  "license": "CC0",
+  "authors": "Josh Dean",
+  "size": [
+    0.7043,
+    3.8706,
+    0.3865
+  ],
+  "bottomCentre": [
+    -0.0,
+    0.0,
+    0.0
+  ],
+  "tris": 30610,
+  "materials": [
+    {
+      "name": "street_lamp_01",
+      "baseMap": "street_lamp_01_diff_1k.jpg",
+      "normalMap": "street_lamp_01_nor_gl_1k.jpg",
+      "maskMap": "street_lamp_01_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "street_lamp_01_glass",
+      "baseMap": "street_lamp_01_diff_1k.jpg",
+      "normalMap": "street_lamp_01_nor_gl_1k.jpg",
+      "maskMap": "street_lamp_01_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "BLEND",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "street_lamp_01_bulb",
+      "baseMap": "street_lamp_01_diff_1k.jpg",
+      "normalMap": "street_lamp_01_nor_gl_1k.jpg",
+      "maskMap": "street_lamp_01_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

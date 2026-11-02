@@ -1,0 +1,43 @@
+{
+  "slug": "large_castle_door",
+  "source": "https://polyhaven.com/a/large_castle_door",
+  "license": "CC0",
+  "authors": "Tina",
+  "size": [
+    2.0121,
+    2.9648,
+    0.3389
+  ],
+  "bottomCentre": [
+    0.0442,
+    -0.0297,
+    0.058
+  ],
+  "tris": 12640,
+  "materials": [
+    {
+      "name": "large_castle_door",
+      "baseMap": "large_castle_door_diff_1k.jpg",
+      "normalMap": "large_castle_door_nor_gl_1k.jpg",
+      "maskMap": "large_castle_door_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}

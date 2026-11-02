@@ -1,0 +1,91 @@
+{
+  "slug": "metal_trash_can",
+  "source": "https://polyhaven.com/a/metal_trash_can",
+  "license": "CC0",
+  "authors": "GurJas Studios",
+  "size": [
+    1.8469,
+    0.9062,
+    0.5563
+  ],
+  "bottomCentre": [
+    0.0964,
+    0.0001,
+    -0.0
+  ],
+  "tris": 13960,
+  "materials": [
+    {
+      "name": "metal_trash_can",
+      "baseMap": "metal_trash_can_diff_1k.jpg",
+      "normalMap": "metal_trash_can_nor_gl_1k.jpg",
+      "maskMap": "metal_trash_can_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "metal_trash_can_rust",
+      "baseMap": "metal_trash_can_rust_diff_1k.jpg",
+      "normalMap": "metal_trash_can_rust_nor_gl_1k.jpg",
+      "maskMap": "metal_trash_can_rust_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    },
+    {
+      "name": "metal_trash_can_rust_2",
+      "baseMap": "metal_trash_can_rust_diff_1k.jpg",
+      "normalMap": "metal_trash_can_rust_nor_gl_1k.jpg",
+      "maskMap": "metal_trash_can_rust_ms_1k.png",
+      "emissionMap": "",
+      "baseColor": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "emission": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "metallic": 1.0,
+      "roughness": 1.0,
+      "alphaMode": "OPAQUE",
+      "alphaCutoff": 0.5,
+      "transmission": 0.0,
+      "doubleSided": true
+    }
+  ]
+}
