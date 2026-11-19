@@ -32,6 +32,11 @@ def print_stats(s, label="p(team0)"):
 def report(df):
     wins0, wins1, draws = counts(df)
     print(f"rounds: {len(df)}, team0: {wins0}, team1: {wins1}, draws: {draws}")
+    if {"alive0", "alive1"}.issubset(df.columns):
+        tied = df[df["winner"] == -1]
+        timeouts = ((tied["alive0"] > 0) & (tied["alive1"] > 0)).sum()
+        mutual_eliminations = ((tied["alive0"] == 0) & (tied["alive1"] == 0)).sum()
+        print(f"draws by cause: time limit {timeouts}, both teams eliminated {mutual_eliminations}")
     print_stats(stats(wins0, wins1))
     print(f"mean round length: {df['duration'].mean():.1f} s")
     print("team sizes:", sorted(int(x) for x in df["size0"].unique()), sorted(int(x) for x in df["size1"].unique()))

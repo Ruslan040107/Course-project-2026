@@ -516,16 +516,34 @@ public class BotController : MonoBehaviour
     void Wander()
     {
         if (agent.pathPending) return;
-        if (agent.hasPath && agent.remainingDistance > 1.5f) return;
 
         // a bigger map tells the wander area through MapBounds, the arena keeps arenaHalfSize
         float hx = bounds != null && bounds.wanderHalfX > 0f ? bounds.wanderHalfX : arenaHalfSize;
         float hz = bounds != null && bounds.wanderHalfZ > 0f ? bounds.wanderHalfZ : arenaHalfSize;
+        var round = RoundManager.Current;
+        bool searchMid = (hx > arenaHalfSize || hz > arenaHalfSize) && round != null
+                         && !round.IsSolo && !round.InBreak && !round.MatchOver
+                         && round.TimeLeft <= Mathf.Min(30f, round.roundTime * 0.5f);
+        if (searchMid)
+        {
+            // Search the same central lanes from either side when time is short and contact has been lost.
+            hx = Mathf.Min(hx, 10f);
+            hz = Mathf.Min(hz, 10f);
+        }
+
+        const float sampleRadius = 6f;
+        if (agent.hasPath && agent.remainingDistance > 1.5f)
+        {
+            if (!searchMid) return;
+            Vector3 goal = agent.destination;
+            // A point sampled beside cover may lie just outside the patrol rectangle.
+            if (Mathf.Abs(goal.x) <= hx + sampleRadius && Mathf.Abs(goal.z) <= hz + sampleRadius) return;
+        }
         Vector3 point = new Vector3(
             Random.Range(-hx, hx), 0f,
             Random.Range(-hz, hz));
 
-        if (NavMesh.SamplePosition(point, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+        if (NavMesh.SamplePosition(point, out NavMeshHit hit, sampleRadius, NavMesh.AllAreas))
             agent.SetDestination(hit.position);
     }
 

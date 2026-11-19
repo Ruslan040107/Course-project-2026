@@ -1,0 +1,21 @@
+{
+  "defaults": {
+    "bots": 5,
+    "roundtime": 60,
+    "timescale": 20,
+    "weapon0": "AK-47",
+    "weapon1": "AK-47",
+    "stealth0": 0,
+    "stealth1": 0,
+    "bhop0": 0,
+    "bhop1": 0,
+    "sneak": 0.6,
+    "crouch": 0.4,
+    "penetration": 0,
+    "ff": 0
+  },
+  "experiments": [
+    { "name": "patrol_borgo", "params": { "map": "BorgoMap" } },
+    { "name": "patrol_porto", "params": { "map": "PortoMap" } }
+  ]
+}
