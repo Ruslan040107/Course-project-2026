@@ -1,0 +1,41 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fcb0b43c764995948a4449caf3171a1c, type: 3}
+  m_Name: Decoy Grenade
+  m_EditorClassIdentifier: Assembly-CSharp::GrenadeData
+  grenadeName: Decoy Grenade
+  displayName: "\u041B\u043E\u0436\u043D\u0430\u044F \u0433\u0440\u0430\u043D\u0430\u0442\u0430"
+  type: 4
+  team: -1
+  description: "\u041F\u043E\u0441\u043B\u0435 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0438 \u0438\u043C\u0438\u0442\u0438\u0440\u0443\u0435\u0442 \u0432\u044B\u0441\u0442\u0440\u0435\u043B\u044B \u0438 \u043E\u0442\u043C\u0435\u0442\u043A\u0443 \u043D\u0430 \u0440\u0430\u0434\u0430\u0440\u0435, \u043E\u0442\u0432\u043B\u0435\u043A\u0430\u044F \u0432\u0440\u0430\u0433\u043E\u0432 \u0438 \u0431\u043E\u0442\u043E\u0432."
+  price: 50
+  killReward: 300
+  maxCarry: 1
+  fuseTime: 1.5
+  airFuseTime: 0
+  radius: 40
+  damage: 5
+  duration: 15
+  throwSpeedHigh: 18.5
+  throwSpeedMid: 12.5
+  throwSpeedLow: 7.2
+  throwUpBoost: 3.2
+  bounciness: 0.44
+  drag: 0.12
+  moveSpeedFactor: 0.98
+  drawTime: 0.45
+  pinPullTime: 0.22
+  worldPrefab: {fileID: 919132149155446097, guid: 8c9550e085d68b44394c0f016aa083ed, type: 3}
+  throwSound: {fileID: 8300000, guid: 6e7bbb0d80410d94795084f789163490, type: 3}
+  bounceSound: {fileID: 8300000, guid: 0ab8da13361b9a242b8b6e19abe7a016, type: 3}
+  detonateSound: {fileID: 0}
+  loopSound: {fileID: 0}

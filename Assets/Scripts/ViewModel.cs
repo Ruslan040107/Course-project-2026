@@ -298,6 +298,8 @@ public class ViewModel : MonoBehaviour
     // the character the view shows: the player (Init), or the teammate the dead player watches (Bind; shoot is null for a bot)
     Weapon weapon;
     PlayerShoot shoot;
+    PlayerLoadout loadout;
+    PlayerGrenades grenades;
     Health owner;
     CharacterController controller;
     BotController bot;
@@ -319,6 +321,7 @@ public class ViewModel : MonoBehaviour
     float flashUntil;
 
     readonly Dictionary<WeaponData, Model> models = new Dictionary<WeaponData, Model>();
+    readonly Dictionary<GrenadeData, GrenadeView> grenadeViews = new Dictionary<GrenadeData, GrenadeView>();
     readonly Dictionary<string, Material> materials = new Dictionary<string, Material>();
     readonly List<Shell> shells = new List<Shell>();
     int nextShell;
@@ -327,6 +330,20 @@ public class ViewModel : MonoBehaviour
 
     Model current;
     WeaponData currentData;
+    GrenadeView currentGrenadeView;
+    GrenadeData currentGrenadeData;
+    float grenadeDrawStart = -10f;
+
+    class GrenadeView
+    {
+        public GameObject root;
+        public Transform modelHolder;
+        public Transform pin;
+        public Vector3 pinRest;
+        public GameObject wickFlame;
+        public Arm leftArm, rightArm;
+        public Vector3 leftRest, rightRest, pinGrab;
+    }
 
     float drawStart = -10f, drawTime = 0.5f;
     float boltStart = -10f, boltTime = 1f;
@@ -418,6 +435,8 @@ public class ViewModel : MonoBehaviour
         weapon = w;
         shoot = s;
         owner = h;
+        loadout = h != null ? h.GetComponent<PlayerLoadout>() : null;
+        grenades = loadout != null ? loadout.Grenades : null;
         controller = h != null ? h.GetComponent<CharacterController>() : null;
         bot = h != null ? h.GetComponent<BotController>() : null;
         homeWeapon = w;
@@ -472,6 +491,8 @@ public class ViewModel : MonoBehaviour
         weapon = w;
         owner = h;
         shoot = s;
+        loadout = h != null ? h.GetComponent<PlayerLoadout>() : null;
+        grenades = loadout != null ? loadout.Grenades : null;
         bot = h != null ? h.GetComponent<BotController>() : null;
         controller = h != null && bot == null ? h.GetComponent<CharacterController>() : null;
         if (weapon != null) weapon.ReloadStarted += OnReloadStarted;
@@ -648,10 +669,24 @@ public class ViewModel : MonoBehaviour
         UpdateShells(dt);
         TrackOwner(dt);
 
+        bool alive = owner != null && !owner.IsDead;
+        bool inGrenade = alive && shoot != null && loadout != null && loadout.InGrenadeSlot && grenades != null
+            && (grenades.Selected != null || grenades.ThrowingData != null);
+        if (inGrenade)
+        {
+            if (current != null && current.root.activeSelf) current.root.SetActive(false);
+            if (flash != null && flash.gameObject.activeSelf) flash.gameObject.SetActive(false);
+            if (!pivot.gameObject.activeSelf) pivot.gameObject.SetActive(true);
+            RenderGrenadeView(dt);
+            return;
+        }
+        if (currentGrenadeView != null && currentGrenadeView.root.activeSelf)
+            currentGrenadeView.root.SetActive(false);
+        currentGrenadeData = null;
+
         if (weapon != null && weapon.data != currentData) SwitchTo(weapon.data);
 
         // sounds go on even when the model is hidden (the AWP bolt in the scope)
-        bool alive = owner != null && !owner.IsDead;
         if (alive && current != null && weapon != null)
         {
             TrackReload();
@@ -1442,6 +1477,8 @@ public class ViewModel : MonoBehaviour
     void SwitchTo(WeaponData d)
     {
         if (current != null) current.root.SetActive(false);
+        if (currentGrenadeView != null) currentGrenadeView.root.SetActive(false);
+        currentGrenadeData = null;
 
         currentData = d;
         current = null;
@@ -2531,6 +2568,178 @@ public class ViewModel : MonoBehaviour
     static Transform Tube(Transform parent, Vector3 pos, float radius, float length, Material mat)
     {
         return Part(parent, cylinderMesh, pos, new Vector3(radius * 2f, length * 0.5f, radius * 2f), mat, new Vector3(90f, 0f, 0f));
+    }
+
+    // ---------------- grenades first person view ----------------
+
+    void RenderGrenadeView(float dt)
+    {
+        GrenadeData gd = grenades.State == PlayerGrenades.ThrowState.Throwing && grenades.ThrowingData != null
+            ? grenades.ThrowingData : grenades.Selected;
+        if (gd == null) return;
+
+        if (gd != currentGrenadeData)
+        {
+            if (currentGrenadeView != null) currentGrenadeView.root.SetActive(false);
+            currentGrenadeData = gd;
+            if (!grenadeViews.TryGetValue(gd, out currentGrenadeView))
+            {
+                currentGrenadeView = BuildGrenadeView(gd);
+                grenadeViews[gd] = currentGrenadeView;
+            }
+            currentGrenadeView.root.SetActive(true);
+            grenadeDrawStart = Time.time;
+        }
+        else if (currentGrenadeView != null && !currentGrenadeView.root.activeSelf)
+        {
+            currentGrenadeView.root.SetActive(true);
+            grenadeDrawStart = Time.time;
+        }
+
+        GrenadeView gv = currentGrenadeView;
+        if (gv == null) return;
+
+        posePos = hipPosition + new Vector3(0.02f, -0.02f, 0.02f);
+        poseRot = Vector3.zero;
+        Sway(dt);
+
+        // Draw raise animation
+        float drawU = Mathf.Clamp01((Time.time - grenadeDrawStart) / Mathf.Max(0.15f, gd.drawTime));
+        float drawEase = Ease(drawU);
+        posePos += new Vector3(0f, -0.20f, -0.04f) * (1f - drawEase);
+        poseRot += new Vector3(38f, -8f, 0f) * (1f - drawEase);
+
+        Vector3 rHand = gv.rightRest;
+        Vector3 lHand = gv.leftRest;
+        Vector3 lElbowLift = Vector3.zero;
+        bool showModel = true;
+        bool pinPulled = false;
+        Vector3 pinOffset = Vector3.zero;
+        bool molotovLit = false;
+
+        PlayerGrenades.ThrowState st = grenades.State;
+        float stTime = grenades.StateTime;
+
+        if (st == PlayerGrenades.ThrowState.Pulling)
+        {
+            float p = Mathf.Clamp01(stTime / Mathf.Max(0.05f, gd.pinPullTime));
+            float pullBack = Mathf.SmoothStep(0f, 1f, p);
+            lHand = Vector3.Lerp(gv.leftRest, gv.pinGrab, Mathf.Clamp01(p * 1.5f));
+            lHand += new Vector3(-0.07f, 0.02f, -0.03f) * Mathf.Max(0f, p - 0.35f) * 1.6f;
+            lElbowLift = new Vector3(0f, 0.04f, 0f) * pullBack;
+            pinOffset = new Vector3(-0.04f, 0.02f, -0.02f) * pullBack;
+            poseRot += new Vector3(4f, 8f, -6f) * pullBack;
+            molotovLit = p > 0.4f;
+        }
+        else if (st == PlayerGrenades.ThrowState.Holding)
+        {
+            pinPulled = true;
+            molotovLit = true;
+            ThrowStrength str = grenades.CurrentStrength;
+            if (str == ThrowStrength.High)
+            {
+                posePos += new Vector3(0.05f, 0.06f, -0.07f);
+                poseRot += new Vector3(-22f, 14f, -12f);
+                lHand = gv.leftRest + new Vector3(-0.04f, -0.04f, 0.04f);
+            }
+            else if (str == ThrowStrength.Mid)
+            {
+                posePos += new Vector3(0.02f, 0.01f, -0.05f);
+                poseRot += new Vector3(-10f, 6f, -5f);
+                lHand = gv.leftRest + new Vector3(-0.03f, -0.02f, 0.02f);
+            }
+            else
+            {
+                posePos += new Vector3(-0.02f, -0.05f, -0.03f);
+                poseRot += new Vector3(14f, -4f, 6f);
+                lHand = gv.leftRest + new Vector3(-0.02f, -0.05f, 0.01f);
+            }
+        }
+        else if (st == PlayerGrenades.ThrowState.Throwing)
+        {
+            pinPulled = true;
+            showModel = false;
+            float p = Mathf.Clamp01(stTime / 0.22f);
+            float swing = Mathf.Sin(p * Mathf.PI);
+            posePos += new Vector3(-0.05f, -0.02f, 0.16f) * swing;
+            poseRot += new Vector3(28f, -16f, -18f) * swing;
+            lHand = gv.leftRest + new Vector3(-0.05f, -0.06f, 0f) * swing;
+        }
+
+        if (gv.modelHolder != null && gv.modelHolder.gameObject.activeSelf != showModel)
+            gv.modelHolder.gameObject.SetActive(showModel);
+
+        if (gv.pin != null)
+        {
+            if (gv.pin.gameObject.activeSelf == pinPulled) gv.pin.gameObject.SetActive(!pinPulled);
+            gv.pin.localPosition = gv.pinRest + pinOffset;
+        }
+
+        if (gv.wickFlame != null && gv.wickFlame.activeSelf != (molotovLit && showModel))
+            gv.wickFlame.SetActive(molotovLit && showModel);
+
+        if (gv.leftArm != null) Reach(gv.leftArm, lHand, lElbowLift);
+        if (gv.rightArm != null) Reach(gv.rightArm, rHand, Vector3.zero);
+
+        pivot.localPosition = posePos;
+        pivot.localRotation = Quaternion.Euler(poseRot);
+    }
+
+    GrenadeView BuildGrenadeView(GrenadeData gd)
+    {
+        GrenadeView gv = new GrenadeView();
+        gv.root = new GameObject("GrenadeView_" + gd.grenadeName);
+        Transform r = gv.root.transform;
+        r.SetParent(pivot, false);
+        r.localScale = Vector3.one * modelScale;
+
+        Transform holder = new GameObject("ModelHolder").transform;
+        holder.SetParent(r, false);
+        gv.modelHolder = holder;
+
+        GameObject prefab = gd.worldPrefab != null ? gd.worldPrefab : Resources.Load<GameObject>("GrenadeModels/" + gd.grenadeName);
+        if (prefab != null)
+        {
+            GameObject model = SpawnModel(prefab, holder, false);
+            model.transform.localScale = Vector3.one * 1.55f;
+            gv.pin = FindChild(model.transform, "Pin");
+            if (gv.pin != null)
+            {
+                gv.pinRest = gv.pin.localPosition;
+                gv.pinGrab = r.InverseTransformPoint(gv.pin.position);
+            }
+            Transform wick = FindChild(model.transform, "Wick");
+            if (wick != null)
+            {
+                GameObject flame = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                DestroyImmediate(flame.GetComponent<Collider>());
+                flame.name = "WickFlame";
+                flame.transform.SetParent(wick, false);
+                flame.transform.localPosition = Vector3.zero;
+                flame.transform.localScale = Vector3.one * 0.025f;
+                Material fm = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 0.62f, 0.12f, 0.95f) };
+                flame.GetComponent<MeshRenderer>().sharedMaterial = fm;
+                flame.SetActive(false);
+                gv.wickFlame = flame;
+                if (gv.pinGrab == Vector3.zero) gv.pinGrab = r.InverseTransformPoint(wick.position);
+            }
+        }
+        else
+        {
+            Box(holder, Vector3.zero, new Vector3(0.06f, 0.1f, 0.06f), Metal());
+        }
+
+        gv.rightRest = new Vector3(0.008f, -0.02f, -0.01f);
+        gv.leftRest = new Vector3(-0.16f, -0.06f, 0.08f);
+        if (gv.pinGrab == Vector3.zero) gv.pinGrab = new Vector3(-0.02f, 0.07f, 0.01f);
+
+        gv.rightArm = BuildArm(r, gv.rightRest, RightElbow, new Vector3(0.055f, 0.065f, 0.085f), new Vector3(12f, 0f, -10f),
+                               new Vector3(-0.026f, 0.025f, 0.01f), new Vector3(0.014f, 0.018f, 0.045f));
+        gv.leftArm = BuildArm(r, gv.leftRest, LeftElbowPistol, new Vector3(0.052f, 0.06f, 0.08f), new Vector3(10f, 15f, -20f),
+                              new Vector3(0.024f, 0.025f, 0.01f), new Vector3(0.014f, 0.018f, 0.045f));
+
+        gv.root.SetActive(false);
+        return gv;
     }
 
     static float Ease(float t)

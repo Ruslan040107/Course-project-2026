@@ -17,6 +17,12 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/PortoMap.unity
     guid: 57a7273fe39fea241a690b3c291dce1b
+  - enabled: 1
+    path: Assets/Scenes/Dust2Map.unity
+    guid: d6f68c5359cd12149a3d8b3e07f485ea
+  - enabled: 1
+    path: Assets/Scenes/MirageMap.unity
+    guid: 5c870aabba67ae949834123ff03ba039
   m_configObjects:
     com.unity.dt.app-ui: {fileID: 11400000, guid: 1b1c20d82303e4b5781c3ef50ac1449f, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

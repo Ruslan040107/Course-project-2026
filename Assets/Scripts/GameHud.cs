@@ -78,6 +78,7 @@ public class GameHud : MonoBehaviour
     public PlayerController player;
     Health health;
     PlayerShoot shoot;
+    PlayerLoadout loadout;
     Weapon weapon;
     Bhop bhop;
     Spectator spectator;
@@ -262,6 +263,7 @@ public class GameHud : MonoBehaviour
 
         health = player.GetComponent<Health>();
         shoot = player.GetComponent<PlayerShoot>();
+        loadout = player.GetComponent<PlayerLoadout>();
         spectator = player.GetComponent<Spectator>();
         bhop = player.GetComponent<Bhop>();
         rounds = FindAnyObjectByType<RoundManager>();
@@ -411,10 +413,20 @@ public class GameHud : MonoBehaviour
         if (!dead)
         {
             DrawDamageArcs(k);
-            DrawCrosshair(k);
-            DrawModeSwitch(k);
-            if (health != null) leftTop = DrawHealth(k, health, true);
-            if (weapon != null) DrawAmmo(k, weapon);
+            if (loadout != null && loadout.InGrenadeSlot)
+            {
+                DrawCrosshair(k);
+                if (health != null) leftTop = DrawHealth(k, health, true);
+                DrawGrenadeAmmo(k, loadout.Grenades);
+            }
+            else
+            {
+                DrawCrosshair(k);
+                DrawModeSwitch(k);
+                if (health != null) leftTop = DrawHealth(k, health, true);
+                if (weapon != null) DrawAmmo(k, weapon);
+                DrawCarriedGrenadesStrip(k);
+            }
         }
         else
         {
@@ -759,6 +771,96 @@ public class GameHud : MonoBehaviour
             if (hasName) Text(new Rect(nameX, box.y + 2f * k, nameW, half), w.weaponName, smallStyle, DimText, TextAnchor.LowerLeft);
             Text(new Rect(nameX, box.y + half + 4f * k, nameW, half - 4f * k), sub, tinyStyle, subColor, TextAnchor.UpperLeft);
         }
+    }
+
+    readonly Dictionary<string, Texture2D> grenadeIcons = new Dictionary<string, Texture2D>();
+
+    Texture2D GrenadeIcon(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        if (!grenadeIcons.TryGetValue(name, out Texture2D tex))
+        {
+            tex = Resources.Load<Texture2D>("KillIcons/" + name);
+            grenadeIcons[name] = tex;
+        }
+        return tex;
+    }
+
+    void DrawCarriedGrenadesStrip(float k)
+    {
+        if (loadout == null || loadout.Grenades == null || !loadout.Grenades.HasAny) return;
+        float m = Margin * k;
+        float bh = BoxHeight * k;
+        float bw = AmmoBoxWidth * k;
+        float ih = Mathf.Round(24f * k);
+        float x = Screen.width - m - bw;
+        float y = Screen.height - m - bh - ih - 8f * k;
+        // Draw small icons right-aligned just above the ammo box when slot list is hidden
+        float right = Screen.width - m - 8f * k;
+        for (int i = loadout.Grenades.Items.Count - 1; i >= 0; i--)
+        {
+            GrenadeData gd = loadout.Grenades.Items[i];
+            if (gd == null) continue;
+            Texture2D icon = GrenadeIcon(gd.grenadeName);
+            if (icon == null || icon.height <= 0) continue;
+            float iw = Mathf.Round(ih * icon.width / icon.height);
+            GUI.color = new Color(1f, 1f, 1f, 0.72f);
+            GUI.DrawTexture(new Rect(right - iw, y, iw, ih), icon);
+            right -= iw + 8f * k;
+        }
+        GUI.color = Color.white;
+        if (right < x) { }
+    }
+
+    void DrawGrenadeAmmo(float k, PlayerGrenades pg)
+    {
+        if (pg == null || pg.Selected == null) return;
+        GrenadeData g = pg.Selected;
+
+        float m = Margin * k;
+        float bh = BoxHeight * k;
+        float bw = AmmoBoxWidth * k;
+        Rect box = new Rect(Screen.width - m - bw, Screen.height - m - bh, bw, bh);
+        DrawPanel(box, PanelColor, false);
+
+        float pad = 16f * k;
+        float textH = bh - 6f * k;
+        float right = box.xMax - pad;
+
+        string countStr = Weapon.InfiniteAmmo ? "∞" : pg.Count + "/" + PlayerGrenades.MaxTotal;
+        float cw = Width(midStyle, countStr);
+        Text(new Rect(right - cw, box.y + 7f * k, cw, textH), countStr, midStyle, DimText, TextAnchor.MiddleRight);
+
+        float iconRight = right - cw - 10f * k;
+        for (int i = pg.Items.Count - 1; i >= 0; i--)
+        {
+            GrenadeData item = pg.Items[i];
+            if (item == null) continue;
+            Texture2D ic = GrenadeIcon(item.grenadeName);
+            if (ic == null || ic.height <= 0) continue;
+            float ih = Mathf.Round(24f * k);
+            float iw = Mathf.Round(ih * ic.width / ic.height);
+            GUI.color = item == g ? reloadColor : new Color(1f, 1f, 1f, 0.35f);
+            GUI.DrawTexture(new Rect(iconRight - iw, Mathf.Round(box.center.y - ih * 0.5f), iw, ih), ic);
+            iconRight -= iw + 6f * k;
+        }
+        GUI.color = Color.white;
+
+        float nameX = box.x + pad;
+        float nameW = Mathf.Max(0f, iconRight - nameX - 6f * k);
+        float half = Mathf.Round(textH * 0.5f);
+        Text(new Rect(nameX, box.y + 2f * k, nameW, half), g.displayName, smallStyle, Color.white, TextAnchor.LowerLeft);
+
+        string sub = "ЛКМ СИЛЬНЫЙ · ЛКМ+ПКМ СРЕДН. · ПКМ СЛАБЫЙ";
+        Color subCol = DimText;
+        if (pg.State == PlayerGrenades.ThrowState.Pulling || pg.State == PlayerGrenades.ThrowState.Holding)
+        {
+            sub = pg.CurrentStrength == ThrowStrength.High ? "БРОСОК: СИЛЬНЫЙ (ЛКМ)"
+                : pg.CurrentStrength == ThrowStrength.Mid ? "БРОСОК: СРЕДНИЙ (ЛКМ+ПКМ)"
+                : "БРОСОК: СЛАБЫЙ (ПКМ)";
+            subCol = reloadColor;
+        }
+        Text(new Rect(nameX, box.y + half + 4f * k, nameW + 100f * k, half - 4f * k), sub, tinyStyle, subCol, TextAnchor.UpperLeft);
     }
 
     // a thin bar along the bottom of a box (reload, Zeus charge)

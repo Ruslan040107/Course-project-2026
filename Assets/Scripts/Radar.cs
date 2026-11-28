@@ -92,6 +92,7 @@ public class Radar : MonoBehaviour
 
     readonly Dictionary<Health, Spot> spots = new Dictionary<Health, Spot>();
     readonly List<Health> gone = new List<Health>();
+    readonly List<Vector3> decoyPoints = new List<Vector3>();
     // a character model gives up to 7 points from its hitboxes (CharacterBody.AimPoints), the capsule 5
     readonly Vector3[] bodyPoints = new Vector3[8];
     static readonly RaycastHit[] lineHits = new RaycastHit[32];
@@ -101,6 +102,7 @@ public class Radar : MonoBehaviour
     Vector3 centrePos;
     Vector3 centreForward = Vector3.forward;
     Health centreOwner;
+    MapCallouts callouts;
 
     // the map: a texture of the level seen from above
     Texture2D mapTexture;
@@ -209,6 +211,7 @@ public class Radar : MonoBehaviour
             enabled = false;
             return;
         }
+        callouts = FindAnyObjectByType<MapCallouts>();
         playerHealth = player.GetComponent<Health>();
         FindCamera();
 
@@ -409,6 +412,7 @@ public class Radar : MonoBehaviour
     // the one who looks is not in his own way (the hitboxes of his arms and gun hands in front of his eyes)
     static bool ClearLine(Vector3 from, Vector3 to, Health target, Health self)
     {
+        if (GrenadeSystem.IsLineBlockedBySmoke(from, to)) return false;
         Vector3 dir = to - from;
         float d = dir.magnitude;
         if (d < 0.01f) return true;
@@ -780,6 +784,12 @@ public class Radar : MonoBehaviour
         }
         GUI.color = Color.white;
         GUI.DrawTexture(r, ringTexture);
+        if (callouts != null && centreOwner != null)
+        {
+            string place = callouts.At(centreOwner.transform.position - Vector3.up);
+            if (place != null)
+                GUI.Box(new Rect(r.x, r.yMax + 3, Mathf.Max(r.width, GUI.skin.box.CalcSize(new GUIContent(place)).x + 12), 23), place);
+        }
 
         // the icons grow with the radar
         float s = size / 220f;
@@ -830,6 +840,11 @@ public class Radar : MonoBehaviour
             col.a *= a;
             Icon(sp.visible ? h.transform.position : sp.lastPos, dotTexture, col, enemySize, c, radius, scale);
         }
+
+        // active enemy decoys show up as red enemy dots on the radar
+        GrenadeSystem.GetActiveDecoyPositions(team, decoyPoints);
+        for (int i = 0; i < decoyPoints.Count; i++)
+            Icon(decoyPoints[i], dotTexture, enemyColor, enemySize, c, radius, scale);
 
         GUI.color = Color.white;
         GUI.DrawTexture(new Rect(c.x - arrowSize * 0.5f, c.y - arrowSize * 0.5f, arrowSize, arrowSize), arrowTexture);

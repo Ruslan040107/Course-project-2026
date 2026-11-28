@@ -4,7 +4,7 @@ using UnityEngine.SceneManagement;
 
 // Main menu, pause menu and settings, drawn with IMGUI on top of everything else (GUI.depth -100).
 // - Main menu: shown once when the game starts (GameSettings.MenuDone == false) over the frozen game:
-//   the map (◄ ► or the mouse wheel: Арена, Пустыня, Борго, Порт, each only when its scene is in the build; saved),
+//   the map (◄ ► or the mouse wheel; only scenes included in the build are offered),
 //   training (solo) and N×N on that map, the match options, settings, quit.
 //   Match options: players per team 1..10 with the player (−/+ or the mouse wheel; default = the first scene's
 //   RoundManager.botsPerTeam from the Inspector, the choice is saved and is dropped when that Inspector value
@@ -32,6 +32,8 @@ public class MainMenu : MonoBehaviour
     public const string DesertScene = "DesertMap";
     public const string BorgoScene = "BorgoMap";
     public const string PortoScene = "PortoMap";
+    public const string Dust2Scene = "Dust2Map";
+    public const string MirageScene = "MirageMap";
 
     // the maps of the menu and of the console (DevConsole "map"): the scene, its name, one line about it and the words
     // the console takes for it. A map is offered only when its scene is in the build (MapInBuild).
@@ -55,6 +57,8 @@ public class MainMenu : MonoBehaviour
         new MapInfo(DesertScene, "Пустыня", "Большая карта 80×64 м: три линии, тоннели, двери", "desert", "пустыня", "desertmap"),
         new MapInfo(BorgoScene, "Борго", "Итальянский городок 96×76 м: площадь с фонтаном, терраса A, балкон B", "borgo", "борго", "borgomap"),
         new MapInfo(PortoScene, "Порт", "Порт 104×80 м: контейнеры, док и мостки A, резервуары B", "porto", "порт", "port", "portomap"),
+        new MapInfo(Dust2Scene, "Dust 2", "Двойные двери в миду, длинная улица у A и тоннели к B", "dust2", "даст2", "dust 2", "даст 2", "de_dust2"),
+        new MapInfo(MirageScene, "Mirage", "Апартаменты над B, окно в миду и дворец у A", "mirage", "мираж", "de_mirage"),
     };
 
     // the scene can be loaded (it is in the build list)

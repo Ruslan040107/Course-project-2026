@@ -116,3 +116,16 @@ InitTestScene*.unity*
 # batch experiments: per-process parts and python cache
 Analysis/data/_parts/
 __pycache__/
+
+# Geometry converted from the user's local CS2 installation.
+/Tools/Blender/Maps/
+/Assets/Models/Maps/
+/Assets/Models/Maps.meta
+/Assets/Scenes/Dust2Map*.asset*
+/Assets/Scenes/MirageMap*.asset*
+/Assets/Scenes/Dust2Map.unity*
+/Assets/Scenes/MirageMap.unity*
+/Assets/Materials/Dust2/
+/Assets/Materials/Dust2.meta
+/Assets/Materials/Mirage/
+/Assets/Materials/Mirage.meta

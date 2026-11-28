@@ -10,6 +10,7 @@ public class PlayerShoot : MonoBehaviour
 
     Health health;
     PlayerController pcRef;
+    PlayerLoadout loadout;
     Camera cam;
     float baseFov = 90f;
     float currentFov = 90f;
@@ -109,6 +110,7 @@ public class PlayerShoot : MonoBehaviour
         }
 
         pcRef = GetComponent<PlayerController>();
+        loadout = GetComponent<PlayerLoadout>();
         if (pcRef != null && pcRef.cameraTransform != null) cam = pcRef.cameraTransform.GetComponent<Camera>();
 
         if (cam != null)
@@ -129,8 +131,9 @@ public class PlayerShoot : MonoBehaviour
     {
         if (weapon == null) return;
 
+        bool holdingGrenade = loadout != null && loadout.InGrenadeSlot;
         bool dead = health != null && health.IsDead;
-        int levels = RightClickZooms ? ScopeLevels() : 0;
+        int levels = !holdingGrenade && RightClickZooms ? ScopeLevels() : 0;
 
         // GameHud draws the crosshair (none for sniper rifles, only the scope): the canvas image stays hidden;
         // without GameHud the old image is used as before (an optic rifle keeps it until it zooms)
@@ -142,7 +145,7 @@ public class PlayerShoot : MonoBehaviour
             }
             else if (!dead)
             {
-                crosshair.SetActive(!weapon.HasSniperScope && zoomLevel == 0);
+                crosshair.SetActive(!holdingGrenade && !weapon.HasSniperScope && zoomLevel == 0);
             }
         }
 
@@ -152,8 +155,8 @@ public class PlayerShoot : MonoBehaviour
             ResetZoom();
         }
 
-        // no scope while the weapon is being drawn or reloaded: right click does nothing then
-        bool busy = weapon.IsDrawing || weapon.IsReloading;
+        // no scope while the weapon is being drawn or reloaded, or holding a grenade
+        bool busy = holdingGrenade || weapon.IsDrawing || weapon.IsReloading;
         if (dead || levels == 0 || busy) ResetZoom();
 
         // the mouse buttons and keys belong to the game only while the cursor is locked and the developer console is closed
@@ -167,6 +170,12 @@ public class PlayerShoot : MonoBehaviour
 
         weapon.Scoped = zoomLevel > 0;
         ApplyFov();
+
+        if (holdingGrenade)
+        {
+            weapon.AltFireHeld = false;
+            return;
+        }
 
         // R8: fanning spread for the crosshair while right click is held; letting go of the left button (or a menu taking the
         // cursor) before the hammer is fully pulled cancels the shot

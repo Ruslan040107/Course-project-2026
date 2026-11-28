@@ -184,6 +184,8 @@ public class RoundManager : MonoBehaviour
     int roundsPlayed;
     string message = "";
     string csvPath;
+    float firstEnemyKillTime;
+    public bool useSpawnPointRotation;
     GUIStyle style;
 
     // economy (normal 5v5 games only): lost rounds in a row of each team, for the loss bonus
@@ -301,7 +303,7 @@ public class RoundManager : MonoBehaviour
             {
                 csvPath = Path.Combine(dir, "sim_" + stamp + ".csv");
             }
-            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1,bhop0,bhop1,map,penetration,ff,sneak,crouch\n");
+            File.WriteAllText(csvPath, "round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1,bhop0,bhop1,map,penetration,ff,sneak,crouch,firstEnemyKillTime\n");
             Debug.Log("Simulation results: " + csvPath);
         }
 
@@ -508,13 +510,20 @@ public class RoundManager : MonoBehaviour
     // kill reward of the killer weapon (knife $1500, SMG $600, AWP $100 ...), a teammate killed: -$300
     void OnKilled(KillInfo info)
     {
+        if (simulation && !inBreak && !matchOver && firstEnemyKillTime < 0f &&
+            info.killer != null && info.victim != null && info.killer.team != info.victim.team)
+            firstEnemyKillTime = Mathf.Clamp(roundTime - timer, 0f, roundTime);
         if (!Economy.Enabled || simulation || matchOver) return;
         Health killer = info.killer;
         Health victim = info.victim;
         if (killer == null || victim == null || killer == victim) return;
 
         if (killer.team == victim.team) Economy.Add(killer, -Economy.TeamKillPenalty, Economy.ReasonTeamKill);
-        else Economy.Add(killer, Economy.KillReward(info.weapon), Economy.ReasonKill);
+        else
+        {
+            int reward = info.grenade != null ? info.grenade.killReward : Economy.KillReward(info.weapon);
+            Economy.Add(killer, reward, Economy.ReasonKill);
+        }
     }
 
     // round end: the winners get $3250, the losers the loss bonus; a draw is a loss for both teams
@@ -788,6 +797,7 @@ public class RoundManager : MonoBehaviour
 
     void StartRound()
     {
+        firstEnemyKillTime = -1f;
         roundKills.Clear();
         roundDamage.Clear();
 
@@ -913,6 +923,7 @@ public class RoundManager : MonoBehaviour
     // looking from this place at the map centre; fallbackYaw when the place is the centre itself
     Quaternion SpawnFacing(Vector3 from, float fallbackYaw)
     {
+        if (useSpawnPointRotation) return Quaternion.Euler(0f, fallbackYaw, 0f);
         Vector3 to = SpawnLookTarget() - from;
         to.y = 0f;
         if (to.sqrMagnitude < 0.25f) return Quaternion.Euler(0f, fallbackYaw, 0f);
@@ -1250,7 +1261,7 @@ public class RoundManager : MonoBehaviour
     void LogRound(int winner, int alive0, int alive1, float duration)
     {
         string line = string.Format(CultureInfo.InvariantCulture,
-            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2},{12},{13},{14},{15},{16},{17},{18},{19:F2},{20:F2}\n",
+            "{0},{1},{2},{3},{4},{5},{6},{7},{8:F2},{9:F2},{10:F2},{11:F2},{12},{13},{14},{15},{16},{17},{18},{19:F2},{20:F2},{21:F2}\n",
             roundsPlayed, winner, alive0, alive1, Size(0), Size(1),
             stealthLevel0, stealthLevel1, speedPenalty, radiusFactor, revealTime, duration,
             weaponTeam0 != null ? weaponTeam0.weaponName : "default",
@@ -1259,7 +1270,7 @@ public class RoundManager : MonoBehaviour
             Weapon.PenetrationEnabled ? 1 : 0,
             Weapon.FriendlyFire ? 1 : 0,
             botSneakChance,
-            botCrouchChance);
+            botCrouchChance, firstEnemyKillTime);
         File.AppendAllText(csvPath, line);
     }
 

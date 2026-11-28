@@ -10,6 +10,7 @@ public struct KillInfo
     public bool inAir;
     public bool wallbang;       // the killing bullet went through a wall or another object
     public WeaponData weapon;   // the killer's weapon (null: fall, out of the map)
+    public GrenadeData grenade; // the killer's grenade (when killed by HE/Molotov/Decoy)
     public Health assister;   // dealt enough damage to the victim, but did not make the kill
 }
 
@@ -48,6 +49,7 @@ public class Health : MonoBehaviour
     bool pendingInAir;
     bool pendingWallbang;
     WeaponData pendingWeapon;
+    GrenadeData pendingGrenade;
     GUIStyle style;
 
     public bool IsDead => current <= 0f;
@@ -83,7 +85,7 @@ public class Health : MonoBehaviour
     }
 
     public void TakeDamage(float amount, Health attacker = null, bool headshot = false, bool noScope = false, bool inAir = false,
-                           bool wallbang = false, WeaponData weapon = null)
+                           bool wallbang = false, WeaponData weapon = null, GrenadeData grenade = null)
     {
         if (IsDead) return;
         if (attacker != null) Damaged?.Invoke(attacker);
@@ -108,7 +110,8 @@ public class Health : MonoBehaviour
         pendingNoScope = noScope;
         pendingInAir = inAir;
         pendingWallbang = wallbang;
-        pendingWeapon = weapon;
+        pendingWeapon = grenade != null ? null : weapon;
+        pendingGrenade = grenade;
     }
 
     bool IsEnemy(Health h)
@@ -130,6 +133,7 @@ public class Health : MonoBehaviour
         pendingInAir = false;
         pendingWallbang = false;
         pendingWeapon = null;
+        pendingGrenade = null;
     }
 
     public void ApplyPending()
@@ -223,6 +227,7 @@ public class Health : MonoBehaviour
             inAir = pendingInAir,
             wallbang = pendingWallbang,
             weapon = pendingWeapon,
+            grenade = pendingGrenade,
             assister = assister
         };
 

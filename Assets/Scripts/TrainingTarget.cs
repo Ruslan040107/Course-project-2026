@@ -24,7 +24,7 @@ public class TrainingTarget : MonoBehaviour
     [Tooltip("the model turns to the player once, at the start")] public bool facePlayer = true;
 
     // the first CT agent (CharacterBody.LoadModel falls back to CT_Swat while it is not in the project)
-    public const string DefaultModel = "Characters/CT_SAS";
+    public const string DefaultModel = "Characters/CT_Character";
 
     struct Popup
     {
@@ -101,7 +101,7 @@ public class TrainingTarget : MonoBehaviour
     {
         if (!CharacterBody.VisualsAllowed() || string.IsNullOrEmpty(modelPath)) return;
         // CT_Swat was the default before the agents: the scenes saved then (the desert) keep it in their field
-        string path = modelPath == CharacterBody.CTFallback ? DefaultModel : modelPath;
+        string path = (modelPath == CharacterBody.CTFallback || modelPath == "Characters/CT_SAS") ? DefaultModel : modelPath;
         GameObject prefab = CharacterBody.LoadModel(path);
         if (prefab == null) return;
 

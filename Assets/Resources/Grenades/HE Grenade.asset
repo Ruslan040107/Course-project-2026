@@ -1,0 +1,41 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fcb0b43c764995948a4449caf3171a1c, type: 3}
+  m_Name: HE Grenade
+  m_EditorClassIdentifier: Assembly-CSharp::GrenadeData
+  grenadeName: HE Grenade
+  displayName: "\u041E\u0441\u043A\u043E\u043B\u043E\u0447\u043D\u0430\u044F \u0433\u0440\u0430\u043D\u0430\u0442\u0430"
+  type: 0
+  team: -1
+  description: "\u0412\u0437\u0440\u044B\u0432\u0430\u0435\u0442\u0441\u044F \u0447\u0435\u0440\u0435\u0437 1,6 \u0441 \u0438 \u043D\u0430\u043D\u043E\u0441\u0438\u0442 \u043E\u0441\u043A\u043E\u043B\u043E\u0447\u043D\u044B\u0439 \u0443\u0440\u043E\u043D \u0432 \u0440\u0430\u0434\u0438\u0443\u0441\u0435. \u0421\u0442\u0435\u043D\u044B \u0438 \u0443\u043A\u0440\u044B\u0442\u0438\u044F \u0431\u043B\u043E\u043A\u0438\u0440\u0443\u044E\u0442 \u0432\u0437\u0440\u044B\u0432."
+  price: 300
+  killReward: 300
+  maxCarry: 1
+  fuseTime: 1.6
+  airFuseTime: 0
+  radius: 9
+  damage: 98
+  duration: 0
+  throwSpeedHigh: 18.5
+  throwSpeedMid: 12.5
+  throwSpeedLow: 7.2
+  throwUpBoost: 3.2
+  bounciness: 0.42
+  drag: 0.12
+  moveSpeedFactor: 0.98
+  drawTime: 0.45
+  pinPullTime: 0.22
+  worldPrefab: {fileID: 919132149155446097, guid: f8a9cda5dd1744e4eb799003d83f67d2, type: 3}
+  throwSound: {fileID: 8300000, guid: 6e7bbb0d80410d94795084f789163490, type: 3}
+  bounceSound: {fileID: 8300000, guid: 0ab8da13361b9a242b8b6e19abe7a016, type: 3}
+  detonateSound: {fileID: 8300000, guid: aa94490287df6f945be2e6f92ec8699c, type: 3}
+  loopSound: {fileID: 0}

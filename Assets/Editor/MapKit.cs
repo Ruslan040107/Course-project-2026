@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEditor.Rendering.Universal.ShaderGUI;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
@@ -132,10 +133,9 @@ public static class MapKit
         used.Clear();
         propBounds.Clear();
         Folder(MaterialPath);
-        Folder(MeshPath);
 
-        AssetDatabase.DeleteAsset(ScenePath);
-        if (!AssetDatabase.CopyAsset(SourceScene, ScenePath))
+        var template = EditorSceneManager.OpenScene(SourceScene, OpenSceneMode.Single);
+        if (!EditorSceneManager.SaveScene(template, ScenePath, true))
         {
             Debug.LogError("MapKit: could not copy " + SourceScene);
             return false;
@@ -156,9 +156,9 @@ public static class MapKit
 
     // NavMesh, save the scene, add it to the build list; meshes and materials of this map that were not used any more
     // are deleted from Assets/Meshes/<Map> and Assets/Materials/<Map>
-    public static void Finish()
+    public static void Finish(NavMeshCollectGeometry geometry = NavMeshCollectGeometry.RenderMeshes)
     {
-        BakeNavMesh();
+        BakeNavMesh(geometry);
         Save();
         Prune(MeshPath);
         Prune(MaterialPath);
@@ -187,17 +187,28 @@ public static class MapKit
 
     // NavMeshSurface on Level, collects the render meshes of its children (agent radius 0.5, height 2, slope 45,
     // climb 0.75 from the project settings) -> Assets/Scenes/<Scene>_NavMesh.asset
-    public static void BakeNavMesh()
+    public static void BakeNavMesh(NavMeshCollectGeometry geometry = NavMeshCollectGeometry.RenderMeshes)
     {
         NavMeshSurface surface = Level.GetComponent<NavMeshSurface>();
         if (surface == null) surface = Level.gameObject.AddComponent<NavMeshSurface>();
         surface.collectObjects = CollectObjects.Children;
-        surface.useGeometry = UnityEngine.AI.NavMeshCollectGeometry.RenderMeshes;
+        surface.useGeometry = geometry;
         surface.BuildNavMesh();
 
         string path = "Assets/Scenes/" + SceneName + "_NavMesh.asset";
-        AssetDatabase.DeleteAsset(path);
-        AssetDatabase.CreateAsset(surface.navMeshData, path);
+        var existing = AssetDatabase.LoadAssetAtPath<NavMeshData>(path);
+        if (existing == null)
+            AssetDatabase.CreateAsset(surface.navMeshData, path);
+        else
+        {
+            var baked = surface.navMeshData;
+            surface.RemoveData();
+            EditorUtility.CopySerialized(baked, existing);
+            surface.navMeshData = existing;
+            surface.AddData();
+            EditorUtility.SetDirty(existing);
+            Object.DestroyImmediate(baked);
+        }
         EditorUtility.SetDirty(surface);
     }
 
@@ -1189,6 +1200,7 @@ public static class MapKit
         {
             key = key.Replace(' ', '_');
             if (meshes.TryGetValue(key, out Mesh cached)) return cached;
+            Folder(MeshPath);
             string path = MeshPath + "/" + key + ".asset";
             used.Add(path);
             Mesh mesh = AssetDatabase.LoadAssetAtPath<Mesh>(path);

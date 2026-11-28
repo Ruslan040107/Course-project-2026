@@ -117,8 +117,8 @@ public static class GameSettings
     public static int AgentT = AgentAuto;
     public static int AgentCT = AgentAuto;
     // names for the settings screen, in the order of the values
-    public static readonly string[] AgentTNames = { "Авто", "Феникс", "Партизан" };
-    public static readonly string[] AgentCTNames = { "Авто", "SAS", "ФБР" };
+    public static readonly string[] AgentTNames = { "Авто", "Бандана" };
+    public static readonly string[] AgentCTNames = { "Авто", "Оператор" };
 
     // the mode chosen in the main menu for the next scene load; null = the scene's own settings
     public static bool? PendingSolo;

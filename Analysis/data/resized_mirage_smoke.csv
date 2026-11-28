@@ -1,0 +1,5 @@
+round,winner,alive0,alive1,size0,size1,stealth0,stealth1,penalty,radius,reveal,duration,weapon0,weapon1,bhop0,bhop1,map,penetration,ff,sneak,crouch,firstEnemyKillTime,part
+1,-1,4,1,5,5,0,0,0.1,0.7,1.0,60.0,AK-47,AK-47,0,0,MirageMap,0,0,0.6,0.4,26.64,0
+2,-1,2,1,5,5,0,0,0.1,0.7,1.0,60.0,AK-47,AK-47,0,0,MirageMap,0,0,0.6,0.4,34.16,0
+3,0,2,0,5,5,0,0,0.1,0.7,1.0,52.04,AK-47,AK-47,0,0,MirageMap,0,0,0.6,0.4,32.74,1
+4,0,1,0,5,5,0,0,0.1,0.7,1.0,44.06,AK-47,AK-47,0,0,MirageMap,0,0,0.6,0.4,24.87,1

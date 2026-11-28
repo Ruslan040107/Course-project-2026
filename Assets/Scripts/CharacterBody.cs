@@ -4,12 +4,7 @@ using UnityEngine.AI;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
-// Character models with animations instead of the capsules (built from Quaternius Ultimate Modular Men, CC0):
-// two agents per team like in CS, Terrorists (team 0) Resources/Characters/T_Phoenix and T_Guerrilla,
-// Counter-Terrorists (team 1) CT_SAS and CT_FBI (an agent that is not in the project falls back to the first models,
-// T_Adventurer / CT_Swat). Bots alternate by their number in the team (T_1, T_3 .. the first agent, T_2, T_4 .. the
-// second), so a team is mixed; the player gets the agent chosen in the settings for the side he plays
-// (GameSettings.AgentT / AgentCT, "Авто" = like a bot, the player counting as number 0), a new choice shows at once.
+// Segmented T and CT models share the animated Quaternius skeleton.
 // - Every model gets "Boost player contrast" (CharacterContrast, GameSettings.BoostPlayerContrast).
 // - The capsule and the other own renderers of the bot or player are hidden (forceRenderingOff).
 // - The model is a child with its feet on the floor. It faces where the character aims (the player: his view),
@@ -95,12 +90,14 @@ public class CharacterBody : MonoBehaviour
     [Range(0f, 1f)] public float hitWeight = 0.7f;
 
     // the agents of each side (Resources paths), the index is the agent number of a character
-    public static readonly string[] TAgents = { "Characters/T_Phoenix", "Characters/T_Guerrilla" };
-    public static readonly string[] CTAgents = { "Characters/CT_SAS", "Characters/CT_FBI" };
+    public static readonly string[] TAgents = { "Characters/T_Character" };
+    public static readonly string[] CTAgents = { "Characters/CT_Character" };
     // the first models: what a missing agent falls back to
     public const string TFallback = "Characters/T_Adventurer";
     public const string CTFallback = "Characters/CT_Swat";
-    public const float ModelHeight = 1.81f;
+    const float ImportHeight = 1.81f;
+    public const float BodyScale = 1.2f;
+    public const float ModelHeight = ImportHeight * BodyScale;
 
     // layer 9 "LocalBody" (used by number, it needs no name in the tag manager): the model of the character the
     // main camera is in; the main camera does not draw it, every other camera does
@@ -355,7 +352,7 @@ public class CharacterBody : MonoBehaviour
         return prefab != null && prefab.name.StartsWith("CT", System.StringComparison.Ordinal) ? 1 : 0;
     }
 
-    // where an instance sits under a parent of scale 1: feet at y 0, facing +Z, about 1.81 m tall
+    // where an instance sits under a parent of scale 1: feet at y 0, facing +Z, scaled to gameplay height
     struct Fit
     {
         public Quaternion rotation;
@@ -464,7 +461,8 @@ public class CharacterBody : MonoBehaviour
 
         float k = 1f;
         float height = maxY - minY;
-        if (any && height > 0.01f && (height < ModelHeight * 0.85f || height > ModelHeight * 1.15f)) k = ModelHeight / height;
+        if (any && height > 0.01f && (height < ImportHeight * 0.85f || height > ImportHeight * 1.15f)) k = ImportHeight / height;
+        k *= BodyScale;
 
         float parentScale = parent != null ? Mathf.Max(parent.lossyScale.y, 1e-4f) : 1f;
         return new Fit
@@ -1063,7 +1061,7 @@ public class CharacterBody : MonoBehaviour
         return agentNumber;
     }
 
-    const int AgentCount = 2;
+    const int AgentCount = 1;
     static int unnumbered;   // characters without a number in the name get 1, 2, 3 ... in the order they are built
 
     // the number at the end of a name ("CT_12" -> 12), -1 if there is none

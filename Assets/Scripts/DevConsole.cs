@@ -590,6 +590,9 @@ public class DevConsole : MonoBehaviour
                 if (words.Length > 1) break;
                 foreach (string[] w in WeaponNames)
                     if (w[1].StartsWith(nt, System.StringComparison.Ordinal)) list.Add(w[1]);
+                foreach (string[] g in GrenadeNames)
+                    if (g[1].StartsWith(nt, System.StringComparison.Ordinal)) list.Add(g[1]);
+                if ("grenades".StartsWith(nt, System.StringComparison.Ordinal)) list.Add("grenades");
                 if ("auto".StartsWith(nt, System.StringComparison.Ordinal)) list.Add("auto");
                 break;
             case "help":
@@ -996,6 +999,16 @@ public class DevConsole : MonoBehaviour
         new[] { "Knife", "knife", "нож" },
     };
 
+    static readonly string[][] GrenadeNames =
+    {
+        new[] { "HE Grenade", "he", "hegrenade", "осколочная", "хае" },
+        new[] { "Flashbang", "flash", "flashbang", "флешка", "световая" },
+        new[] { "Smoke Grenade", "smoke", "smokegrenade", "дым", "смок" },
+        new[] { "Molotov", "molotov", "molly", "молотов" },
+        new[] { "Incendiary", "incendiary", "inc", "зажигательная" },
+        new[] { "Decoy Grenade", "decoy", "обманка", "ложная" },
+    };
+
     // lowercase letters and digits only: "M4A1-S" -> "m4a1s", "Desert Eagle" -> "deserteagle"
     static string Normalize(string s)
     {
@@ -1081,6 +1094,7 @@ public class DevConsole : MonoBehaviour
             }
         }
         if (sb.Length > 0) Say("  " + sb.ToString().TrimEnd());
+        Print("  гранаты: he, flash, smoke, molotov, incendiary, decoy, grenades (набор 4 шт.)", DimColor);
         Print("  auto — автоматическая снайперка своей стороны (T: G3SG1, CT: SCAR-20); можно и полное имя: give desert eagle", DimColor);
     }
 
@@ -1215,7 +1229,7 @@ public class DevConsole : MonoBehaviour
         Add("status", "status", "что сейчас: карта, счёт, живые, деньги, включённые команды", CmdStatus);
         Alias("статус", "status");
 
-        Add("map", "map [карта]", "загрузить карту: arena, desert, borgo, porto (тот же режим и размер команд)", CmdMap,
+        Add("map", "map [карта]", "загрузить карту в том же режиме и с тем же размером команд; map выводит список", CmdMap,
             "Имена по-русски тоже: арена, пустыня, борго, порт. Без имени — список карт и какие есть в сборке.",
             "Бой начинается заново с тем же числом игроков в команде, тренировка остаётся тренировкой.",
             "Примеры: map desert · карта борго · map porto");
@@ -1281,7 +1295,37 @@ public class DevConsole : MonoBehaviour
         }
         if (!NeedAlive()) return;
 
-        WeaponData d = ResolveWeapon(string.Join(" ", a), out string problem);
+        string what = string.Join(" ", a);
+        string norm = Normalize(what);
+        if (norm == "grenades" || norm == "nades" || norm == "гранаты")
+        {
+            PlayerGrenades pg = loadout.Grenades;
+            if (pg == null) { Error("Инвентарь гранат недоступен"); return; }
+            int team = player != null ? player.team : 0;
+            GiveGrenade(pg, GrenadeSystem.Find("HE Grenade"));
+            GiveGrenade(pg, GrenadeSystem.Find("Flashbang"));
+            GiveGrenade(pg, GrenadeSystem.Find("Smoke Grenade"));
+            GiveGrenade(pg, GrenadeSystem.Find(team == 1 ? "Incendiary" : "Molotov"));
+            Ok("Выдан набор гранат (" + pg.Count + "/4)");
+            return;
+        }
+
+        GrenadeData gd = ResolveGrenade(norm);
+        if (gd != null)
+        {
+            PlayerGrenades pg = loadout.Grenades;
+            if (pg == null) { Error("Инвентарь гранат недоступен"); return; }
+            if (!pg.CanCarry(gd, out string reason)) { Error(reason); return; }
+            if (pg.Add(gd))
+            {
+                loadout.SelectGrenade(gd.type);
+                Ok("Выдана граната: " + gd.grenadeName);
+            }
+            else Error("Не получилось выдать " + gd.grenadeName);
+            return;
+        }
+
+        WeaponData d = ResolveWeapon(what, out string problem);
         if (d == null)
         {
             Error(problem);
@@ -1289,6 +1333,22 @@ public class DevConsole : MonoBehaviour
         }
         if (loadout.Give(d)) Ok("Выдано: " + d.weaponName);
         else Error("Не получилось выдать " + d.weaponName);
+    }
+
+    static void GiveGrenade(PlayerGrenades pg, GrenadeData gd)
+    {
+        if (gd != null && pg.CanCarry(gd, out _)) pg.Add(gd);
+    }
+
+    static GrenadeData ResolveGrenade(string norm)
+    {
+        if (string.IsNullOrEmpty(norm)) return null;
+        foreach (string[] g in GrenadeNames)
+            for (int i = 1; i < g.Length; i++)
+                if (g[i] == norm) return GrenadeSystem.Find(g[0]);
+        foreach (GrenadeData gd in GrenadeSystem.AllData)
+            if (gd != null && (Normalize(gd.grenadeName) == norm || Normalize(gd.name) == norm)) return gd;
+        return null;
     }
 
     void CmdAmmo(string[] a)
@@ -1753,7 +1813,7 @@ public class DevConsole : MonoBehaviour
         if (index < 0 && HasCyrillic(want)) index = FindMap(FromRussianLayout(want).ToLowerInvariant());
         if (index < 0)
         {
-            Error("Нет такой карты: " + string.Join(" ", a) + ". Карты: arena, desert, borgo, porto (map — список)");
+            Error("Нет такой карты: " + string.Join(" ", a) + ". Введите map для списка карт.");
             return;
         }
         MainMenu.MapInfo map = MainMenu.Maps[index];

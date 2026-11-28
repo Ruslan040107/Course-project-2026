@@ -51,6 +51,7 @@ public class PlayerController : MonoBehaviour
     CharacterController controller;
     Health health;
     PlayerShoot shoot;
+    PlayerLoadout loadout;
     Bhop bhop;
     Weapon weapon;
     float verticalVelocity;
@@ -87,6 +88,7 @@ public class PlayerController : MonoBehaviour
     public float MoveInaccuracy => moveInaccuracy;
 
     public bool IsGrounded => controller != null && controller.isGrounded;
+    public Vector3 Velocity => controller != null ? controller.velocity : Vector3.zero;
 
     public bool IsCrouching => StandFactor < 0.5f;
     public bool IsSneaking { get; private set; }
@@ -124,6 +126,7 @@ public class PlayerController : MonoBehaviour
         controller = GetComponent<CharacterController>();
         health = GetComponent<Health>();
         shoot = GetComponent<PlayerShoot>();
+        loadout = GetComponent<PlayerLoadout>();
         weapon = shoot != null ? shoot.weapon : GetComponentInChildren<Weapon>();
         currentHeight = standHeight;
 
@@ -225,7 +228,9 @@ public class PlayerController : MonoBehaviour
         controller.center = new Vector3(0f, (currentHeight - standHeight) * 0.5f, 0f);
 
         float k = StandFactor;
-        float baseY = Mathf.Lerp(crouchCameraY, standCameraY, k);
+        float footY = -standHeight * 0.5f;
+        float eyeHeight = (Mathf.Lerp(crouchCameraY, standCameraY, k) - footY) * CharacterBody.BodyScale;
+        float baseY = footY + Mathf.Min(eyeHeight, currentHeight - 0.1f);
 
         float bobTarget = controller.isGrounded ? moveAmount * SpeedFactor() : 0f;
         bobBlend = Mathf.MoveTowards(bobBlend, bobTarget, bobSmoothing * Time.deltaTime);
@@ -242,7 +247,11 @@ public class PlayerController : MonoBehaviour
         float f = Mathf.Lerp(crouchSpeedFactor, 1f, StandFactor);
         if (IsSneaking) f *= sneakSpeedFactor;
 
-        if (weapon != null)
+        if (loadout != null && loadout.InGrenadeSlot && loadout.Grenades != null && loadout.Grenades.Selected != null)
+        {
+            f *= loadout.Grenades.Selected.moveSpeedFactor;
+        }
+        else if (weapon != null)
         {
             // slower while firing for some weapons (R8, G3SG1), see Weapon.CurrentMoveSpeedFactor
             f *= weapon.CurrentMoveSpeedFactor;

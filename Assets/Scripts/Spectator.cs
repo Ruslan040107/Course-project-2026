@@ -29,6 +29,8 @@ public class Spectator : MonoBehaviour
     Texture2D scopeTexture;
     GUIStyle style;
 
+    public Health Watched => spectating ? watched : null;
+
     void Start()
     {
         self = GetComponent<Health>();
@@ -64,7 +66,8 @@ public class Spectator : MonoBehaviour
 
         // the eyes go down when the watched bot crouches (like the player's own crouch camera, 0.6 -> 0.05)
         float eyes = 0.6f;
-        if (watchedBot != null) eyes -= watchedBot.crouchEyeDrop * watchedBot.CrouchAmount;
+        if (watchedBot != null && watchedBot.head != null)
+            eyes = watched.transform.InverseTransformPoint(watchedBot.head.position).y;
         cam.localPosition = new Vector3(0f, eyes, 0.2f);
 
         // clicks on the pause menu buttons (and the click that takes the cursor back) do not switch the watched teammate,

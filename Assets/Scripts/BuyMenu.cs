@@ -61,7 +61,7 @@ public class BuyMenu : MonoBehaviour
         new[] { "MAC-10|MP9", "MP7", "UMP-45", "P90", "PP-Bizon", "MP5-SD" },
         new[] { "Galil AR|FAMAS", "AK-47|M4A4|M4A1-S", "SSG 08", "SG 553|AUG", "AWP", "G3SG1|SCAR-20" },
         new[] { "!vest", "!vesthelmet", "Zeus x27", "!defuser" },
-        new[] { "!molotov|!incendiary", "!decoy", "!flash", "!he", "!smoke", "" },
+        new[] { "Molotov|Incendiary", "Decoy Grenade", "Flashbang", "HE Grenade", "Smoke Grenade", "" },
     };
 
     // the drawn icons of the items that are not in the game yet
@@ -116,7 +116,8 @@ public class BuyMenu : MonoBehaviour
         public string title;
         public int price;
         public int team = -1;          // -1 both sides, 0 T, 1 CT
-        public WeaponData weapon;      // null: not in the game yet (grey)
+        public WeaponData weapon;      // null: not a gun/gear (could be grenade or soon item)
+        public GrenadeData grenade;    // non-null for grenade entries
         public int shape = -1;         // the drawn icon of an item without a weapon
         public string tag = "";        // "скоро" / "недоступно" for an item without a weapon
         public string about = "";      // its description for the stats panel
@@ -229,9 +230,11 @@ public class BuyMenu : MonoBehaviour
     RenderTexture previewRT;
     bool previewBroken, previewReady;
     WeaponData previewFor;
+    GrenadeData previewForGrenade;
     PreviewModel previewModel;
     float previewSince;
     readonly Dictionary<WeaponData, PreviewModel> previewModels = new Dictionary<WeaponData, PreviewModel>();
+    readonly Dictionary<GrenadeData, PreviewModel> grenadePreviewModels = new Dictionary<GrenadeData, PreviewModel>();
 
     // ---------------- life ----------------
 
@@ -533,6 +536,11 @@ public class BuyMenu : MonoBehaviour
         if (!Usable(i)) return;
         Entry e = CurrentSectors()[i].Current;
         if (e == null) return;
+        if (e.grenade != null)
+        {
+            if (BuyGrenade(e.grenade)) Back();
+            return;
+        }
         if (e.weapon == null)
         {
             Notice(e.title + (e.tag == Soon ? ": скоро в игре" : ": недоступно"));
@@ -683,7 +691,9 @@ public class BuyMenu : MonoBehaviour
         {
             foreach (string part in parts)
             {
-                Entry e = part.StartsWith("!") ? SoonEntry(part.Substring(1)) : WeaponEntry(Economy.Find(part));
+                Entry e = part.StartsWith("!")
+                    ? SoonEntry(part.Substring(1))
+                    : WeaponEntry(Economy.Find(part)) ?? GrenadeEntry(GrenadeSystem.Find(part));
                 if (e == null) continue;
                 if (ringTeam >= 0 && e.team >= 0 && e.team != ringTeam) continue;
                 bool own = e.team < 0 || e.team == playerTeam;
@@ -702,6 +712,12 @@ public class BuyMenu : MonoBehaviour
     {
         if (d == null || !Economy.Buyable(d)) return null;
         return new Entry { title = d.weaponName, price = d.price, team = d.team, weapon = d };
+    }
+
+    static Entry GrenadeEntry(GrenadeData g)
+    {
+        if (g == null) return null;
+        return new Entry { title = g.displayName, price = g.price, team = g.team, grenade = g, about = g.description };
     }
 
     static Entry SoonEntry(string key)
@@ -726,7 +742,7 @@ public class BuyMenu : MonoBehaviour
         int money = Economy.MoneyOf(player);
         foreach (Sector s in AllSectors()[c])
             foreach (Entry e in s.options)
-                if (e.weapon != null && e.price <= money) return true;
+                if ((e.weapon != null || e.grenade != null) && e.price <= money) return true;
         return false;
     }
 
@@ -769,6 +785,38 @@ public class BuyMenu : MonoBehaviour
         {
             // the loadout could not take it: the money comes back
             if (!Free) Economy.Set(player, Economy.MoneyOf(player) + d.price);
+            return false;
+        }
+        return true;
+    }
+
+    bool BuyGrenade(GrenadeData g)
+    {
+        if (g == null || !FindPlayer() || loadout.Grenades == null) return false;
+
+        if (!CanBuyNow())
+        {
+            Notice(BlockedNotice());
+            return false;
+        }
+        if (!loadout.Grenades.CanCarry(g, out string reason))
+        {
+            Notice(reason);
+            return false;
+        }
+        if (!Free && !GrenadeSystem.TeamCanBuy(g, Team)) return false;
+
+        int money = Economy.MoneyOf(player);
+        if (!Free && money < g.price)
+        {
+            Notice("Недостаточно денег: не хватает $" + (g.price - money));
+            return false;
+        }
+        if (!Economy.TrySpend(player, g.price, Economy.ReasonBuy)) return false;
+
+        if (!loadout.Grenades.Add(g))
+        {
+            if (!Free) Economy.Set(player, Economy.MoneyOf(player) + g.price);
             return false;
         }
         return true;
@@ -936,8 +984,9 @@ public class BuyMenu : MonoBehaviour
 
         Vector2 p = centre + Dir(AngleOf(i, n)) * S(n == 4 ? 186f : 188f);
         bool hover = i == selected;
-        bool soon = e.weapon == null;
-        bool owned = !soon && loadout.Owns(e.weapon);
+        bool soon = e.weapon == null && e.grenade == null;
+        bool owned = e.weapon != null ? loadout.Owns(e.weapon)
+            : (e.grenade != null && loadout.Grenades != null && !loadout.Grenades.CanCarry(e.grenade, out _));
         bool expensive = !soon && !Free && Economy.MoneyOf(player) < e.price;
         float w = Mathf.Round(S(220f));
         float x = Mathf.Round(p.x - w * 0.5f);
@@ -1112,6 +1161,24 @@ public class BuyMenu : MonoBehaviour
             return;
         }
 
+        if (e.grenade != null)
+        {
+            GrenadeData g = e.grenade;
+            Fill(V(1028f, 779f, 580f, 156f), new Color(0f, 0f, 0f, 0.42f * a));
+            Text(V(1050f, 788f, 536f, 54f), g.description, aboutStyle, Fade(new Color(0.86f, 0.86f, 0.86f, 1f), a), TextAnchor.UpperLeft);
+            float y = 846f;
+            StatRow(y, "РАДИУС:", Mathf.RoundToInt(g.radius) + " м", Mathf.Clamp01(g.radius / 25f), a);
+            y += 26f;
+            if (g.damage > 0f)
+                StatRow(y, g.type == GrenadeType.Fire ? "УРОН В СЕКУНДУ:" : "МАКС. УРОН:", Mathf.RoundToInt(g.damage).ToString(), Mathf.Clamp01(g.damage / 100f), a);
+            else
+                StatRow(y, "ВРЕМЯ ДЕЙСТВИЯ:", g.duration.ToString("0.0") + " с", Mathf.Clamp01(g.duration / 20f), a);
+            y += 26f;
+            int carried = loadout != null && loadout.Grenades != null ? loadout.Grenades.Count : 0;
+            StatRow(y, "ГРАНАТ В ИНВЕНТАРЕ:", carried + " / " + PlayerGrenades.MaxTotal, -1f, a);
+            return;
+        }
+
         Fill(V(1028f, 779f, 580f, 120f), new Color(0f, 0f, 0f, 0.42f * a));
         string about = e.weapon != null ? StatsOf(e.weapon).about : e.about;
         Text(V(1050f, 790f, 536f, 72f), about, aboutStyle, Fade(new Color(0.86f, 0.86f, 0.86f, 1f), a), TextAnchor.UpperLeft);
@@ -1176,6 +1243,25 @@ public class BuyMenu : MonoBehaviour
         OwnSlot(PlayerLoadout.PistolSlot, Y(770f), right, current, a);
         OwnSlot(PlayerLoadout.KnifeSlot, Y(850f), right, current, a);
         OwnSlot(PlayerLoadout.GearSlot, Y(925f), right, current, a);
+
+        if (loadout.Grenades != null && loadout.Grenades.HasAny)
+        {
+            float gx = right;
+            float gy = Y(965f);
+            bool inGren = current == PlayerLoadout.GrenadeSlot;
+            Color gc = inGren ? new Color(0.92f, 0.92f, 0.92f, 1f) : new Color(0.58f, 0.58f, 0.58f, 0.9f);
+            for (int i = loadout.Grenades.Items.Count - 1; i >= 0; i--)
+            {
+                GrenadeData gd = loadout.Grenades.Items[i];
+                if (gd == null) continue;
+                Texture2D ic = Icon(gd.grenadeName);
+                float gh = IconHeight(ic, S(44f), S(32f));
+                if (gh <= 0f) continue;
+                float gw = Mathf.Round(gh * ic.width / ic.height);
+                Draw(new Rect(Mathf.Round(gx - gw), Mathf.Round(gy - gh * 0.5f), gw, gh), ic, Fade(gc, a));
+                gx -= gw + S(10f);
+            }
+        }
     }
 
     void OwnSlot(int slot, float cy, float right, int current, float a)
@@ -1257,11 +1343,23 @@ public class BuyMenu : MonoBehaviour
         return loadout.InSlot(loadout.CurrentSlot);
     }
 
+    GrenadeData PreviewGrenade()
+    {
+        if (!open || loadout == null) return null;
+        if (level == 1)
+        {
+            Entry e = Hovered();
+            if (e != null) return e.grenade;
+        }
+        return loadout.InGrenadeSlot && loadout.Grenades != null ? loadout.Grenades.Selected : null;
+    }
+
     void DrawPreview(Entry hovered, float a)
     {
         WeaponData d = PreviewWeapon();
-        Entry item = hovered != null && hovered.weapon == null ? hovered : null;
-        if (d == null && item == null) return;
+        GrenadeData g = PreviewGrenade();
+        Entry item = hovered != null && hovered.weapon == null && hovered.grenade == null ? hovered : null;
+        if (d == null && g == null && item == null) return;
 
         Rect r = PreviewRect();
         Fill(r, new Color(PreviewBack.r, PreviewBack.g, PreviewBack.b, 0.55f * a));
@@ -1272,7 +1370,7 @@ public class BuyMenu : MonoBehaviour
             DrawIcon(EntryIcon(item), r.center, S(240f), S(240f), new Color(0.5f, 0.5f, 0.5f, 0.8f * a));
             return;
         }
-        if (previewReady && previewFor == d && previewRT != null)
+        if (previewReady && ((d != null && previewFor == d) || (g != null && previewForGrenade == g)) && previewRT != null)
         {
             GUI.color = new Color(1f, 1f, 1f, a);
             GUI.DrawTexture(r, previewRT, ScaleMode.StretchToFill, true);
@@ -1281,19 +1379,27 @@ public class BuyMenu : MonoBehaviour
         else
         {
             // no model (or the 3D view is off): the kill icon, big
-            DrawIcon(Icon(d.weaponName), r.center, S(520f), S(150f), new Color(0.92f, 0.92f, 0.92f, 0.9f * a));
+            string iconName = d != null ? d.weaponName : g != null ? g.grenadeName : "";
+            DrawIcon(Icon(iconName), r.center, S(520f), S(150f), new Color(0.92f, 0.92f, 0.92f, 0.9f * a));
         }
     }
 
-    // LateUpdate: shows the model of PreviewWeapon to the private camera and turns it a little
+    // LateUpdate: shows the model of PreviewWeapon or PreviewGrenade to the private camera and turns it a little
     void UpdatePreview()
     {
         WeaponData want = open && modelPreview ? PreviewWeapon() : null;
-        PreviewModel m = want != null && EnsurePreview() ? ModelOf(want) : null;
+        GrenadeData wantG = open && modelPreview && want == null ? PreviewGrenade() : null;
+        PreviewModel m = null;
+        if (EnsurePreview())
+        {
+            if (want != null) m = ModelOf(want);
+            else if (wantG != null) m = ModelOfGrenade(wantG);
+        }
         if (m == null || m.holder == null)
         {
             if (previewReady || (previewRoot != null && previewRoot.activeSelf)) HidePreview();
             previewFor = null;
+            previewForGrenade = null;
             return;
         }
 
@@ -1315,6 +1421,7 @@ public class BuyMenu : MonoBehaviour
         previewPivot.localRotation = Quaternion.Euler(0f, yaw, 0f) * PreviewTurn;
         previewCam.enabled = true;
         previewFor = want;
+        previewForGrenade = wantG;
         previewReady = true;
     }
 
@@ -1415,6 +1522,43 @@ public class BuyMenu : MonoBehaviour
         return m;
     }
 
+    PreviewModel ModelOfGrenade(GrenadeData g)
+    {
+        if (grenadePreviewModels.TryGetValue(g, out PreviewModel m)) return m;
+        m = null;
+        GameObject prefab = g.worldPrefab != null ? g.worldPrefab : Resources.Load<GameObject>("GrenadeModels/" + g.grenadeName);
+        if (prefab != null)
+        {
+            GameObject holder = null;
+            try
+            {
+                holder = new GameObject("Preview " + g.grenadeName);
+                holder.transform.SetParent(previewPivot, false);
+                GameObject model = ViewModel.SpawnModel(prefab, holder.transform, false);
+                model.transform.localScale *= 3.2f;
+                SetLayer(holder.transform, PreviewLayer);
+                if (LocalBounds(holder.transform, model, out Bounds b))
+                {
+                    holder.transform.localPosition = -b.center;
+                    holder.SetActive(false);
+                    m = new PreviewModel { holder = holder, size = b.size };
+                }
+                else
+                {
+                    Destroy(holder);
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogException(e);
+                if (holder != null) Destroy(holder);
+                m = null;
+            }
+        }
+        grenadePreviewModels[g] = m;
+        return m;
+    }
+
     static void SetLayer(Transform t, int layer)
     {
         t.gameObject.layer = layer;
@@ -1509,6 +1653,9 @@ public class BuyMenu : MonoBehaviour
         previewRT = null;
         previewModel = null;
         previewModels.Clear();
+        grenadePreviewModels.Clear();
+        previewFor = null;
+        previewForGrenade = null;
         previewReady = false;
     }
 
@@ -1526,7 +1673,7 @@ public class BuyMenu : MonoBehaviour
 
     Texture2D EntryIcon(Entry e)
     {
-        if (e.icon == null) e.icon = e.weapon != null ? Icon(e.weapon.weaponName) : ShapeIcon(e.shape);
+        if (e.icon == null) e.icon = e.weapon != null ? Icon(e.weapon.weaponName) : e.grenade != null ? Icon(e.grenade.grenadeName) : ShapeIcon(e.shape);
         return e.icon;
     }
 

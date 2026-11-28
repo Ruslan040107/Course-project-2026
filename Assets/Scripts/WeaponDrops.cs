@@ -591,6 +591,7 @@ public class WeaponDrops : MonoBehaviour
         }
         else if (Input.GetKeyDown(dropKey))
         {
+            if (loadout.InGrenadeSlot) return;
             int slot = loadout.CurrentSlot;
             if (slot >= 0 && slot != PlayerLoadout.KnifeSlot && loadout.InSlot(slot) != null)
             {

@@ -16,6 +16,8 @@ public class PlayerLoadout : MonoBehaviour
     public const int PistolSlot = 1;
     public const int KnifeSlot = 2;
     public const int GearSlot = 3;
+    public const int GrenadeSlot = 4;
+    public const int TotalSlots = 5;
 
     public Weapon weapon;
     [Tooltip("old test list from the scene, not used for the loadout any more (it comes from Resources/Weapons " +
@@ -24,6 +26,7 @@ public class PlayerLoadout : MonoBehaviour
 
     Health health;
     PlayerShoot shoot;
+    PlayerGrenades grenades;
     readonly WeaponData[] owned = new WeaponData[SlotCount];
     // -1 = a full magazine / full reserve (Weapon.Equip)
     readonly int[] ammo = new int[SlotCount];
@@ -36,6 +39,8 @@ public class PlayerLoadout : MonoBehaviour
 
     // for the HUD and the buy menu
     public int CurrentSlot => current;
+    public bool InGrenadeSlot => current == GrenadeSlot && grenades != null && grenades.HasAny;
+    public PlayerGrenades Grenades => grenades;
     public WeaponData InSlot(int slot) => slot >= 0 && slot < SlotCount ? owned[slot] : null;
     public bool Owns(WeaponData d) => d != null && InSlot(SlotOf(d)) == d;
     public static int SlotOf(WeaponData d) => d != null ? (int)d.Slot : -1;
@@ -44,6 +49,8 @@ public class PlayerLoadout : MonoBehaviour
     {
         health = GetComponent<Health>();
         shoot = GetComponent<PlayerShoot>();
+        grenades = GetComponent<PlayerGrenades>();
+        if (grenades == null) grenades = gameObject.AddComponent<PlayerGrenades>();
         if (weapon == null && shoot != null) weapon = shoot.weapon;
         if (weapon == null) weapon = GetComponentInChildren<Weapon>(true);
     }
@@ -70,6 +77,7 @@ public class PlayerLoadout : MonoBehaviour
             GiveDefault();
         }
 
+        if (grenades != null) grenades.NewRound(keep);
         previous = -1;
         current = -1;
         if (shoot != null) shoot.ResetZoom();
@@ -244,7 +252,30 @@ public class PlayerLoadout : MonoBehaviour
         if (Cursor.lockState != CursorLockMode.Locked || DevConsole.IsOpen) return;
 
         for (int i = 0; i < SlotCount; i++)
-            if (Input.GetKeyDown(KeyCode.Alpha1 + i)) Select(i);
+        {
+            if (Input.GetKeyDown(KeyCode.Alpha1 + i))
+            {
+                if (i == GearSlot && owned[GearSlot] == null && grenades != null && grenades.HasAny)
+                    Select(GrenadeSlot);
+                else
+                    Select(i);
+            }
+        }
+
+        if (Input.GetKeyDown(KeyCode.Alpha5) && grenades != null && grenades.HasAny)
+        {
+            if (current == GrenadeSlot) grenades.CycleNext();
+            else Select(GrenadeSlot);
+        }
+
+        if (grenades != null && grenades.HasAny)
+        {
+            if (Input.GetKeyDown(KeyCode.Alpha6)) SelectGrenade(GrenadeType.HE);
+            else if (Input.GetKeyDown(KeyCode.Alpha7)) SelectGrenade(GrenadeType.Flash);
+            else if (Input.GetKeyDown(KeyCode.Alpha8)) SelectGrenade(GrenadeType.Smoke);
+            else if (Input.GetKeyDown(KeyCode.Alpha9)) SelectGrenade(GrenadeType.Fire);
+            else if (Input.GetKeyDown(KeyCode.Alpha0)) SelectGrenade(GrenadeType.Decoy);
+        }
 
         if (Input.GetKeyDown(KeyCode.Q) && previous >= 0) Select(previous);
 
@@ -253,22 +284,68 @@ public class PlayerLoadout : MonoBehaviour
         else if (wheel < 0f) Select(NextOwned(1));
     }
 
+    bool SlotOwned(int slot)
+    {
+        if (slot == GrenadeSlot) return grenades != null && grenades.HasAny;
+        return slot >= 0 && slot < SlotCount && owned[slot] != null;
+    }
+
     // the next owned slot in this direction, going round
     int NextOwned(int dir)
     {
         int start = current < 0 ? 0 : current;
-        for (int step = 1; step <= SlotCount; step++)
+        for (int step = 1; step <= TotalSlots; step++)
         {
-            int i = ((start + dir * step) % SlotCount + SlotCount) % SlotCount;
-            if (owned[i] != null) return i;
+            int i = ((start + dir * step) % TotalSlots + TotalSlots) % TotalSlots;
+            if (SlotOwned(i)) return i;
         }
         return current;
     }
 
+    public bool SelectGrenade(GrenadeType type)
+    {
+        if (grenades == null || !grenades.SelectType(type)) return false;
+        if (current != GrenadeSlot) Select(GrenadeSlot);
+        listShownAt = Time.time;
+        return true;
+    }
+
+    public void SwitchAfterGrenadeThrow()
+    {
+        if (grenades != null && grenades.HasAny)
+        {
+            grenades.BeginDraw();
+            listShownAt = Time.time;
+            return;
+        }
+        current = -1;
+        int target = previous >= 0 && previous < SlotCount && owned[previous] != null ? previous : BestSlot();
+        if (target >= 0) EquipSlot(target);
+    }
+
     void Select(int slot)
     {
+        if (slot == GrenadeSlot)
+        {
+            if (grenades == null || !grenades.HasAny) return;
+            if (current == GrenadeSlot)
+            {
+                grenades.CycleNext();
+                listShownAt = Time.time;
+                return;
+            }
+            SaveCurrent();
+            if (current >= 0) previous = current;
+            current = GrenadeSlot;
+            if (shoot != null) shoot.ResetZoom();
+            grenades.BeginDraw();
+            listShownAt = Time.time;
+            return;
+        }
+
         if (slot == current || slot < 0 || slot >= SlotCount || owned[slot] == null) return;
 
+        if (current == GrenadeSlot && grenades != null) grenades.CancelThrow();
         SaveCurrent();
         if (current >= 0) previous = current;
         EquipSlot(slot);
@@ -301,8 +378,6 @@ public class PlayerLoadout : MonoBehaviour
     int shownSlot = -1;
     WeaponData shownData;
     float listShownAt = -100f;
-    readonly System.Collections.Generic.Dictionary<WeaponData, Texture2D> icons =
-        new System.Collections.Generic.Dictionary<WeaponData, Texture2D>();
 
     void OnGUI()
     {
@@ -312,12 +387,14 @@ public class PlayerLoadout : MonoBehaviour
         if (BuyMenu.IsOpen) return;
         if (Event.current.type != EventType.Repaint) return;
 
-        WeaponData inHands = current >= 0 ? owned[current] : null;
+        WeaponData inHands = current >= 0 && current < SlotCount ? owned[current] : null;
+        GrenadeData curGrenade = current == GrenadeSlot && grenades != null ? grenades.Selected : null;
         bool locked = Cursor.lockState == CursorLockMode.Locked && !DevConsole.IsOpen;
-        if (current != shownSlot || inHands != shownData || (locked && (Input.mouseScrollDelta.y != 0f || SlotKeyDown())))
+        if (current != shownSlot || inHands != shownData || curGrenade != shownGrenade || (locked && (Input.mouseScrollDelta.y != 0f || SlotKeyDown())))
         {
             shownSlot = current;
             shownData = inHands;
+            shownGrenade = curGrenade;
             listShownAt = Time.time;
         }
 
@@ -334,7 +411,8 @@ public class PlayerLoadout : MonoBehaviour
         style.fontSize = Mathf.Max(6, Mathf.RoundToInt(18f * k));
         keyStyle.fontSize = Mathf.Max(6, Mathf.RoundToInt(20f * k));
 
-        int count = 0;
+        bool hasGrenades = grenades != null && grenades.HasAny;
+        int count = hasGrenades ? 1 : 0;
         foreach (WeaponData d in owned) if (d != null) count++;
 
         float w = GameHud.AmmoBoxWidth * k;
@@ -375,24 +453,62 @@ public class PlayerLoadout : MonoBehaviour
 
             GameHud.Text(new Rect(r.x + pad, r.y, w * 0.5f, rowH), owned[i].weaponName, style, text, TextAnchor.MiddleLeft);
         }
+
+        if (hasGrenades)
+        {
+            bool selected = current == GrenadeSlot;
+            Rect r = new Rect(x, Mathf.Round(y), w, rowH);
+            GameHud.DrawPanel(r, new Color(0.03f, 0.04f, 0.05f, (selected ? 0.75f : 0.45f) * alpha), false);
+            if (selected) GameHud.Fill(new Rect(r.xMax - Mathf.Max(2f, Mathf.Round(3f * k)), r.y, Mathf.Max(2f, Mathf.Round(3f * k)), r.height), accent);
+
+            Color text = new Color(1f, 1f, 1f, (selected ? 1f : 0.5f) * alpha);
+            float keyW = 20f * k;
+            GameHud.Text(new Rect(r.xMax - pad - keyW, r.y, keyW, rowH), "5", keyStyle,
+                selected ? accent : text, TextAnchor.MiddleRight);
+
+            float iconRight = r.xMax - pad - keyW - 10f * k;
+            for (int gIdx = grenades.Items.Count - 1; gIdx >= 0; gIdx--)
+            {
+                GrenadeData gd = grenades.Items[gIdx];
+                if (gd == null) continue;
+                Texture2D icon = IconByName(gd.grenadeName);
+                if (icon == null || icon.height <= 0) continue;
+                float ih = Mathf.Round(22f * k);
+                float iw = Mathf.Round(ih * icon.width / icon.height);
+                GUI.color = gd == curGrenade && selected ? accent : text;
+                GUI.DrawTexture(new Rect(iconRight - iw, Mathf.Round(r.center.y - ih * 0.5f), iw, ih), icon);
+                iconRight -= iw + 4f * k;
+            }
+            GUI.color = Color.white;
+
+            string label = curGrenade != null ? curGrenade.grenadeName : "Гранаты (" + grenades.Count + ")";
+            GameHud.Text(new Rect(r.x + pad, r.y, w * 0.52f, rowH), label, style, text, TextAnchor.MiddleLeft);
+        }
         GUI.color = Color.white;
     }
 
+    GrenadeData shownGrenade;
+
     bool SlotKeyDown()
     {
-        for (int i = 0; i < SlotCount; i++)
+        for (int i = 0; i < TotalSlots; i++)
             if (Input.GetKeyDown(KeyCode.Alpha1 + i)) return true;
         return Input.GetKeyDown(KeyCode.Q);
     }
 
-    // the killfeed silhouette of the weapon (Resources/KillIcons/<weapon name>), null if there is none
-    Texture2D Icon(WeaponData d)
+    Texture2D Icon(WeaponData d) => d != null ? IconByName(d.weaponName) : null;
+
+    Texture2D IconByName(string itemName)
     {
-        if (!icons.TryGetValue(d, out Texture2D tex))
+        if (string.IsNullOrEmpty(itemName)) return null;
+        if (!iconCache.TryGetValue(itemName, out Texture2D tex))
         {
-            tex = Resources.Load<Texture2D>("KillIcons/" + d.weaponName);
-            icons[d] = tex;
+            tex = Resources.Load<Texture2D>("KillIcons/" + itemName);
+            iconCache[itemName] = tex;
         }
         return tex;
     }
+
+    readonly System.Collections.Generic.Dictionary<string, Texture2D> iconCache =
+        new System.Collections.Generic.Dictionary<string, Texture2D>();
 }

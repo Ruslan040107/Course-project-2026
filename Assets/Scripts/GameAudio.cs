@@ -142,10 +142,24 @@ public class GameAudio : MonoBehaviour
         Weapon.AnyShellInserted += OnShellInserted;
         ViewModel.AnimationSound += OnAnimationSound;
         RoundManager.RoundEnded += OnRoundEnded;
+
+        GrenadeSystem.AnyPinPulled += OnGrenadePin;
+        GrenadeSystem.AnyThrown += OnGrenadeThrown;
+        GrenadeSystem.AnyBounced += OnGrenadeBounced;
+        GrenadeSystem.AnyHEExploded += OnGrenadeHE;
+        GrenadeSystem.AnyFlashExploded += OnGrenadeFlash;
+        GrenadeSystem.AnySmokeStarted += OnGrenadeSmoke;
+        GrenadeSystem.AnyFireStarted += OnGrenadeFireStarted;
+        GrenadeSystem.AnyFireExtinguished += OnGrenadeFireExtinguished;
+        GrenadeSystem.AnyFireEnded += OnGrenadeFireEnded;
+        GrenadeSystem.AnyDecoyShot += OnGrenadeDecoyShot;
+        GrenadeSystem.AnyDecoyEnded += OnGrenadeDecoyEnded;
+        GrenadeSystem.AnyCleared += OnGrenadesCleared;
     }
 
     [Tooltip("volume of the round win announcement")] [Range(0f, 1f)] public float roundEndVolume = 0.9f;
     AudioSource announcer;
+    readonly Dictionary<int, AudioSource> fireLoops = new Dictionary<int, AudioSource>();
 
     // a team won the round: "Terrorists win" / "Counter-Terrorists win". The author's own clips in
     // Audio/RoundEnd/Local (not in git) are used when they exist, else the CC0 jingles in Audio/RoundEnd/Default.
@@ -171,6 +185,20 @@ public class GameAudio : MonoBehaviour
         Weapon.AnyEquipped -= OnEquipped;
         Weapon.AnyShellInserted -= OnShellInserted;
         ViewModel.AnimationSound -= OnAnimationSound;
+
+        GrenadeSystem.AnyPinPulled -= OnGrenadePin;
+        GrenadeSystem.AnyThrown -= OnGrenadeThrown;
+        GrenadeSystem.AnyBounced -= OnGrenadeBounced;
+        GrenadeSystem.AnyHEExploded -= OnGrenadeHE;
+        GrenadeSystem.AnyFlashExploded -= OnGrenadeFlash;
+        GrenadeSystem.AnySmokeStarted -= OnGrenadeSmoke;
+        GrenadeSystem.AnyFireStarted -= OnGrenadeFireStarted;
+        GrenadeSystem.AnyFireExtinguished -= OnGrenadeFireExtinguished;
+        GrenadeSystem.AnyFireEnded -= OnGrenadeFireEnded;
+        GrenadeSystem.AnyDecoyShot -= OnGrenadeDecoyShot;
+        GrenadeSystem.AnyDecoyEnded -= OnGrenadeDecoyEnded;
+        GrenadeSystem.AnyCleared -= OnGrenadesCleared;
+        OnGrenadesCleared();
     }
 
     // ---------------- playing ----------------
@@ -748,5 +776,160 @@ public class GameAudio : MonoBehaviour
             if (n.Contains("ground") || n.Contains("sand")) return "sand";
         }
         return "concrete";
+    }
+
+    // ---------------- grenades ----------------
+
+    void PlayClip(AudioClip clip, Vector3 pos, float volume, float range, bool local, float pitch = 1f)
+    {
+        if (clip == null) return;
+        Voice v = pool[next];
+        next = (next + 1) % pool.Count;
+        AudioSource src = v.src;
+        src.Stop();
+        src.clip = clip;
+        src.volume = volume * masterVolume;
+        src.pitch = pitch * Random.Range(0.95f, 1.05f);
+        if (local)
+        {
+            src.spatialBlend = 0f;
+            v.lowPass.cutoffFrequency = 22000f;
+        }
+        else
+        {
+            src.transform.position = pos;
+            src.spatialBlend = 1f;
+            src.minDistance = 1f;
+            src.maxDistance = range;
+            src.rolloffMode = AudioRolloffMode.Linear;
+            Transform l = ListenerTransform();
+            float d = l != null ? Vector3.Distance(l.position, pos) : 0f;
+            v.lowPass.cutoffFrequency = Mathf.Lerp(22000f, 1500f, Mathf.Clamp01(d / range));
+        }
+        src.Play();
+    }
+
+    void OnGrenadePin(Health thrower, GrenadeData data)
+    {
+        if (thrower == null) return;
+        bool local = IsLocal(thrower);
+        Play("Grenades/pin", thrower.transform.position, 0.5f, 12f, local);
+    }
+
+    void OnGrenadeThrown(GrenadeProjectile proj)
+    {
+        if (proj == null || proj.Data == null) return;
+        bool local = proj.Owner != null && IsLocal(proj.Owner);
+        if (Get("Grenades/throw").Length > 0) Play("Grenades/throw", proj.transform.position, 0.5f, 15f, local);
+        else PlayClip(proj.Data.throwSound, proj.transform.position, 0.5f, 15f, local);
+    }
+
+    void OnGrenadeBounced(Vector3 pos, float speed, GrenadeData data)
+    {
+        float vol = Mathf.Clamp(speed / 12f, 0.2f, 0.7f);
+        if (Get("Grenades/bounce").Length > 0) Play("Grenades/bounce", pos, vol, 24f, false);
+        else if (data != null) PlayClip(data.bounceSound, pos, vol, 24f, false);
+    }
+
+    void OnGrenadeHE(Vector3 pos, float radius, GrenadeData data)
+    {
+        if (Get("Grenades/he_explode").Length > 0) Play("Grenades/he_explode", pos, 0.95f, 80f, false);
+        else if (data != null) PlayClip(data.detonateSound, pos, 0.95f, 80f, false);
+    }
+
+    void OnGrenadeFlash(Vector3 pos, GrenadeData data, Health localAffected, float localStrength)
+    {
+        if (Get("Grenades/flash_explode").Length > 0) Play("Grenades/flash_explode", pos, 0.9f, 70f, false);
+        else if (data != null) PlayClip(data.detonateSound, pos, 0.9f, 70f, false);
+
+        if (localAffected != null && IsLocal(localAffected) && localStrength > 0.2f)
+        {
+            float ringVol = Mathf.Clamp01(localStrength) * 0.45f;
+            if (Get("Grenades/flash_ring").Length > 0) Play("Grenades/flash_ring", Vector3.zero, ringVol, 10f, true, 1f);
+            else if (data != null) PlayClip(data.loopSound, Vector3.zero, ringVol, 10f, true, 1f);
+        }
+    }
+
+    void OnGrenadeSmoke(GrenadeSystem.SmokeCloud cloud)
+    {
+        if (cloud == null) return;
+        Play("Grenades/smoke_bloom", cloud.center, 0.8f, 45f, false);
+    }
+
+    void OnGrenadeFireStarted(GrenadeSystem.FireZone zone)
+    {
+        if (zone == null || zone.data == null) return;
+        bool molotov = zone.data.team == 0;
+        string path = molotov ? "Grenades/molotov_break" : "Grenades/incendiary_detonate";
+        if (Get(path).Length > 0) Play(path, zone.origin, 0.85f, 55f, false);
+        else PlayClip(zone.data.detonateSound, zone.origin, 0.85f, 55f, false);
+
+        AudioClip loopClip = null;
+        AudioClip[] loopSet = Get("Grenades/fire_loop");
+        if (loopSet.Length > 0) loopClip = loopSet[0];
+        else loopClip = zone.data.loopSound;
+
+        if (loopClip != null && !fireLoops.ContainsKey(zone.id))
+        {
+            GameObject go = new GameObject("FireAudio_" + zone.id);
+            go.transform.SetParent(transform, false);
+            go.transform.position = zone.origin;
+            AudioSource src = go.AddComponent<AudioSource>();
+            src.clip = loopClip;
+            src.loop = true;
+            src.spatialBlend = 1f;
+            src.minDistance = 2f;
+            src.maxDistance = 30f;
+            src.rolloffMode = AudioRolloffMode.Linear;
+            src.volume = 0.55f * masterVolume;
+            src.Play();
+            fireLoops[zone.id] = src;
+        }
+    }
+
+    void OnGrenadeFireExtinguished(Vector3 pos)
+    {
+        Play("Grenades/fire_extinguish", pos, 0.8f, 40f, false);
+    }
+
+    void OnGrenadeFireEnded(int id)
+    {
+        if (!fireLoops.TryGetValue(id, out AudioSource src)) return;
+        fireLoops.Remove(id);
+        if (src != null) Destroy(src.gameObject);
+    }
+
+    void OnGrenadeDecoyShot(Vector3 pos, WeaponData mimicWeapon, Health owner)
+    {
+        ShotSound shot = ShotSoundForData(mimicWeapon);
+        bool silenced = mimicWeapon != null && mimicWeapon.silenced;
+        if (shot.clip != null)
+            Play(shot.clip, pos, silenced ? 0.65f : 0.85f, silenced ? silencedRange : shotRange, false, shot.pitch);
+    }
+
+    void OnGrenadeDecoyEnded(Vector3 pos)
+    {
+        Play("Grenades/he_explode", pos, 0.4f, 30f, false, 1.4f);
+    }
+
+    void OnGrenadesCleared()
+    {
+        foreach (AudioSource src in fireLoops.Values)
+            if (src != null) Destroy(src.gameObject);
+        fireLoops.Clear();
+    }
+
+    ShotSound ShotSoundForData(WeaponData d)
+    {
+        if (d != null && shotSounds.TryGetValue(d, out ShotSound cached)) return cached;
+        string name = d != null ? d.weaponName : "AK-47";
+        ShotSound s = new ShotSound { clip = "Weapons/" + name + "/shot", pitch = 1f };
+        if (Get(s.clip).Length == 0)
+        {
+            s.clip = d != null && d.team == 1 ? "Weapons/M4A4/shot" : "Weapons/AK-47/shot";
+            if (Get(s.clip).Length == 0) s.clip = "Weapons/AK-47/shot";
+        }
+        if (d != null) shotSounds[d] = s;
+        return s;
     }
 }

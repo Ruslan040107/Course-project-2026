@@ -431,15 +431,16 @@ public class CombatEffects : MonoBehaviour
         return null;
     }
 
-    // killfeed picture of a weapon: Resources/KillIcons/<weapon name>, loaded once
-    Texture2D WeaponIcon(WeaponData weapon)
+    // killfeed picture of a weapon or grenade: Resources/KillIcons/<name>, loaded once
+    Texture2D WeaponIcon(WeaponData weapon, GrenadeData grenade = null)
     {
-        if (weapon == null || string.IsNullOrEmpty(weapon.weaponName)) return null;
+        string iconName = weapon != null ? weapon.weaponName : grenade != null ? grenade.grenadeName : null;
+        if (string.IsNullOrEmpty(iconName)) return null;
 
-        if (!weaponIcons.TryGetValue(weapon.weaponName, out Texture2D tex))
+        if (!weaponIcons.TryGetValue(iconName, out Texture2D tex))
         {
-            tex = Resources.Load<Texture2D>("KillIcons/" + weapon.weaponName);
-            weaponIcons[weapon.weaponName] = tex;
+            tex = Resources.Load<Texture2D>("KillIcons/" + iconName);
+            weaponIcons[iconName] = tex;
         }
         return tex;
     }
@@ -471,7 +472,7 @@ public class CombatEffects : MonoBehaviour
             inAir = inAir,
             wallbang = k.wallbang,
             weapon = k.weapon,
-            weaponIcon = WeaponIcon(k.weapon),
+            weaponIcon = WeaponIcon(k.weapon, k.grenade),
             expire = Time.time + 6f
         });
         if (feed.Count > 5) feed.RemoveAt(0);

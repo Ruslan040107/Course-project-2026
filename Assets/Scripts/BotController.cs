@@ -264,11 +264,23 @@ public class BotController : MonoBehaviour
 
             if (seenTime >= reactionTime)
             {
-                head.LookAt(enemyPoint);
+                float blind = GrenadeSystem.GetBlindness(self);
+                Vector3 aimPoint = enemyPoint;
+                if (blind > 0.05f)
+                {
+                    float seed = (self != null ? self.name.GetHashCode() : 0) * 0.01f;
+                    Vector3 offset = new Vector3(
+                        Mathf.Sin(Time.time * 13f + seed) * 1.4f,
+                        Mathf.Cos(Time.time * 9f + seed) * 0.7f,
+                        Mathf.Sin(Time.time * 17f + seed) * 1.4f) * blind;
+                    aimPoint += offset;
+                }
+                head.LookAt(aimPoint);
                 // like the player, a bot cannot scope or shoot until its weapon is drawn
-                weapon.Scoped = !weapon.IsDrawing && distance > noScopeDistance;
+                weapon.Scoped = !weapon.IsDrawing && distance > noScopeDistance && blind < 0.2f;
                 float speedRatio = agent.velocity.magnitude / Mathf.Max(baseSpeed, 0.01f);
                 weapon.ExternalMoveInaccuracy = hopTime >= 0f ? 1.5f : Mathf.Clamp01(Mathf.InverseLerp(0.25f, 0.8f, speedRatio));
+                if (blind > 0.05f) weapon.ExternalSpreadMultiplier *= 1f + 6f * blind;
 
                 // the knife and the Zeus only when the enemy is in their reach
                 float reach = weapon.IsMelee ? weapon.data.meleeRange : weapon.IsTaser ? weapon.range : float.MaxValue;
@@ -524,6 +536,23 @@ public class BotController : MonoBehaviour
         bool searchMid = (hx > arenaHalfSize || hz > arenaHalfSize) && round != null
                          && !round.IsSolo && !round.InBreak && !round.MatchOver
                          && round.TimeLeft <= Mathf.Min(30f, round.roundTime * 0.5f);
+        if (bounds != null && bounds.patrolPoints != null && bounds.patrolPoints.Length > 0)
+        {
+            // The authored destinations are connected streets, including the correct floor in stacked passages.
+            Vector3 rally = bounds.rallyPoint;
+            if (agent.hasPath && agent.remainingDistance > 1.5f &&
+                (!searchMid || (agent.destination - rally).sqrMagnitude < 36f)) return;
+
+            Vector3 goal = bounds.patrolPoints[Random.Range(0, bounds.patrolPoints.Length)];
+            if (searchMid)
+            {
+                Vector2 offset = Random.insideUnitCircle * 3f;
+                goal = rally + new Vector3(offset.x, 0f, offset.y);
+            }
+            if (NavMesh.SamplePosition(goal, out NavMeshHit waypoint, 1.5f, NavMesh.AllAreas))
+                agent.SetDestination(waypoint.position);
+            return;
+        }
         if (searchMid)
         {
             // Search the same central lanes from either side when time is short and contact has been lost.
@@ -596,9 +625,12 @@ public class BotController : MonoBehaviour
         float distance = toTarget.magnitude;
         if (distance < 0.01f) return true;
 
-        float radius = viewRange;
+        float blind = GrenadeSystem.GetBlindness(self);
+        if (blind > 0.55f && distance > 2f) return false;
+
+        float radius = viewRange * Mathf.Lerp(1f, 0.2f, blind);
         Stealth st = t.GetComponent<Stealth>();
-        if (st != null) radius = st.DetectionRadius(viewRange);
+        if (st != null) radius = st.DetectionRadius(radius);
         if (distance > radius) return false;
 
         Vector3 flat = toTarget;
@@ -614,6 +646,7 @@ public class BotController : MonoBehaviour
         if (count == 0) count = BodyPoints(b, flat);
         for (int i = 0; i < count; i++)
         {
+            if (GrenadeSystem.IsLineBlockedBySmoke(from, bodyPoints[i])) continue;
             Vector3 dir = bodyPoints[i] - from;
             float d = dir.magnitude;
             if (d < 0.01f) continue;

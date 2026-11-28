@@ -12,6 +12,8 @@ public class MapBounds : MonoBehaviour
     [Tooltip("bots wander inside +-this area; 0 = the bot's own arenaHalfSize (the arena map uses 0)")]
     public float wanderHalfX;
     public float wanderHalfZ;
+    public Vector3[] patrolPoints;
+    public Vector3 rallyPoint;
 
     readonly Dictionary<Health, float> outside = new Dictionary<Health, float>();
 
